@@ -48,17 +48,28 @@ DPAPI secret → validated DB keys → local SQLCipher decrypt → local DB expo
 
 ## 安装
 
-要求：Windows 10/11、64 位 Python 3.11/3.12、Windows 微信 4.x。
+要求：Windows 10/11、64 位 Python 3.12、Windows 微信 4.x。正式/可复现安装使用仓库中的 `requirements-win.lock`；它包含当前已验证的完整 Windows 依赖图和语音转写依赖。
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install "uv==0.12.7"
+.\.venv\Scripts\uv.exe pip install --python .\.venv\Scripts\python.exe -r requirements-win.lock
+.\.venv\Scripts\uv.exe pip install --python .\.venv\Scripts\python.exe --no-deps --no-build-isolation .
 ```
 
-需要本地语音转写：
+这样安装得到的核心版本与 Windows CI 使用的版本一致。SenseVoice 模型文件不进入 lock，也不会提交到 Git；第一次真正执行语音转写时仍会下载到本机 `%LOCALAPPDATA%` 模型缓存。
+
+开发时如果需要重新解析允许范围内的新依赖，可以直接使用 `pyproject.toml`：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[voice]"
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[voice,dev]"
+```
+
+修改依赖声明后，用固定的 uv 版本重新生成 lock：
+
+```powershell
+uv pip compile pyproject.toml --extra voice --extra dev --python-version 3.12 --python-platform windows --output-file requirements-win.lock
 ```
 
 ## 使用

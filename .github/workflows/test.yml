@@ -7,14 +7,35 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-      - name: Install
-        run: python -m pip install -e ".[dev]"
+      - name: Install uv
+        run: python -m pip install "uv==0.12.7"
+      - name: Verify dependency lock is current
+        shell: pwsh
+        run: |
+          uv pip compile pyproject.toml --extra voice --extra dev --python-version 3.12 --python-platform windows --output-file requirements-win.lock
+          git diff --exit-code -- requirements-win.lock
+      - name: Create clean environment
+        run: python -m venv .venv-ci
+      - name: Install locked dependencies
+        run: uv pip install --python .venv-ci\Scripts\python.exe -r requirements-win.lock
+      - name: Install project without resolving dependencies
+        run: uv pip install --python .venv-ci\Scripts\python.exe --no-deps --no-build-isolation .
+      - name: Verify key dependency versions
+        shell: pwsh
+        run: |
+          .\.venv-ci\Scripts\python.exe -c "import importlib.metadata as m; expected={'wechatauto-replica':'1.2.0.3','funasr-onnx':'0.4.2','modelscope':'1.39.1','silk-python':'0.2.8'}; actual={k:m.version(k) for k in expected}; assert actual == expected, (actual, expected); print(actual)"
       - name: Test
-        run: python -m pytest
+        run: .\.venv-ci\Scripts\python.exe -m pytest --basetemp=.pytest-tmp
+      - name: CLI smoke
+        shell: pwsh
+        run: |
+          .\.venv-ci\Scripts\python.exe -m wechat_local_archive --help
+          .\.venv-ci\Scripts\python.exe -m wechat_local_archive doctor
+      - name: Diff check
+        run: git diff --check
