@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import html
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -160,47 +158,24 @@ def _materialize_media(
     if not other_targets:
         return count, warnings
 
-    downloader = session.media_downloader(assets_dir)
     for index, message in enumerate(other_targets, start=1):
         base_type = selected_media_type(message.type_code)
-        category = {3: "image", 43: "video", 49: "file"}.get(base_type, "other")
+        category = {43: "video"}.get(base_type, "other")
         destination = assets_dir / category
         destination.mkdir(parents=True, exist_ok=True)
         if progress:
             progress(index - 1, len(other_targets), f"Extracting {category} {index}/{len(other_targets)}")
         try:
-            if base_type == 3:
-                if session.cfg_dword is None:
-                    warnings.append(
-                        f"image key is not cached; skipping image for message {message.id} to preserve offline-only mode"
-                    )
-                    continue
-                resolved = downloader.download_image(
-                    archive.conversation_id,
-                    message.local_id,
-                    save_dir=str(destination),
-                )
-            elif base_type == 43:
-                resolved = downloader.download_video(
-                    archive.conversation_id,
-                    message.local_id,
-                    save_dir=str(destination),
-                )
-            else:
-                resolved = downloader.download_file(
-                    archive.conversation_id,
-                    message.local_id,
-                    save_dir=str(destination),
-                )
+            resolved_path = session.resolve_video(
+                archive.conversation_id,
+                message.local_id,
+                destination,
+            )
         except Exception as exc:
             warnings.append(f"{category} extraction failed for message {message.id}: {exc}")
             continue
-        if not resolved:
+        if resolved_path is None:
             warnings.append(f"{category} is not available locally for message {message.id}")
-            continue
-        resolved_path = Path(resolved)
-        if not resolved_path.is_file():
-            warnings.append(f"{category} extractor returned a missing file for message {message.id}")
             continue
         message.attachment = relative_attachment(resolved_path, output_dir)
         count += 1
@@ -222,25 +197,7 @@ def _materialize_images_bulk(
     if not expected:
         return 0, [f"image metadata is missing for message {message.id}" for message in targets]
 
-    chat_hash = hashlib.md5(archive.conversation_id.encode("utf-8")).hexdigest()
-    attach_root = Path(session.db.account_dir) / "msg" / "attach" / chat_hash
-    found: dict[str, dict[str, Path]] = {key: {} for key in expected}
-    if attach_root.is_dir():
-        for root, _dirs, files in os.walk(attach_root):
-            for name in files:
-                lowered = name.casefold()
-                suffix = None
-                digest = None
-                if lowered.endswith("_h.dat"):
-                    digest, suffix = lowered[:-6], "high"
-                elif lowered.endswith("_t.dat"):
-                    digest, suffix = lowered[:-6], "thumb"
-                elif lowered.endswith(".dat"):
-                    digest, suffix = lowered[:-4], "normal"
-                if digest in expected and suffix:
-                    found[digest][suffix] = Path(root) / name
-
-    downloader = session.media_downloader(destination)
+    found = session.find_image_sources(archive.conversation_id, set(expected))
     warnings: list[str] = []
     count = 0
     for index, message in enumerate(targets, start=1):
@@ -253,7 +210,7 @@ def _materialize_images_bulk(
             warnings.append(f"image is not available locally for message {message.id}")
             continue
         try:
-            data = downloader.decrypt_image(str(source))
+            data = session.decrypt_image(source)
             suffix = "_thumb" if source == choices.get("thumb") else ""
             if data[:3] == b"\xff\xd8\xff":
                 ext = "jpg"
@@ -262,7 +219,7 @@ def _materialize_images_bulk(
             elif data[:3] == b"GIF":
                 ext = "gif"
             elif data[:4] == b"wxgf":
-                jpg = _convert_wxgf_to_jpg(data) or downloader._wxgf_to_jpg(data)
+                jpg = _convert_wxgf_to_jpg(data)
                 if jpg is not None:
                     data, ext = jpg, "jpg"
                 else:
@@ -289,12 +246,11 @@ def _materialize_files_bulk(
 ) -> tuple[int, list[str]]:
     destination = output_dir / "assets" / "file"
     destination.mkdir(parents=True, exist_ok=True)
-    base = Path(session.db.account_dir) / "msg" / "file"
-    by_name: dict[str, list[Path]] = {}
-    if base.is_dir():
-        for root, _dirs, files in os.walk(base):
-            for name in files:
-                by_name.setdefault(name.casefold(), []).append(Path(root) / name)
+    requested_names = {
+        _extract_xml_text(message.content, ("title",)).replace("\\", "/").split("/")[-1].strip()
+        for message in targets
+    }
+    by_name = session.find_file_sources(requested_names)
 
     warnings: list[str] = []
     count = 0
@@ -381,53 +337,26 @@ def _materialize_voices_bulk(
     by_server = {int(message.server_id): message for message in targets if int(message.server_id) > 0}
     by_local = {int(message.local_id): message for message in targets if int(message.local_id) > 0}
     matched: set[str] = set()
-    media_dbs = [
-        (rel, path)
-        for rel, path, _size in session.db._db_files
-        if os.path.basename(path).startswith("media_")
-    ]
-    for db_index, (rel, _path) in enumerate(media_dbs, start=1):
-        if progress:
-            progress(db_index - 1, len(media_dbs), f"Reading voice shard {db_index}/{len(media_dbs)}")
-        conn = session.db._open(rel)
-        try:
-            cid = conn.execute(
-                "SELECT rowid FROM Name2Id WHERE user_name=? LIMIT 1",
-                (archive.conversation_id,),
-            ).fetchone()
-            if not cid:
-                continue
-            rows = conn.execute(
-                "SELECT local_id, svr_id, voice_data FROM VoiceInfo "
-                "WHERE chat_name_id=? AND voice_data IS NOT NULL",
-                (cid[0],),
-            )
-            for row in rows:
-                message = None
-                svr_id = int(row["svr_id"] or 0)
-                local_id = int(row["local_id"] or 0)
-                if svr_id > 0:
-                    message = by_server.get(svr_id)
-                if message is None and local_id > 0:
-                    message = by_local.get(local_id)
-                if message is None or message.id in matched:
-                    continue
-                data = row["voice_data"]
-                if not data:
-                    continue
-                target = destination / f"{archive.conversation_id}_{message.local_id}.silk"
-                target.write_bytes(data)
-                message.attachment = relative_attachment(target, output_dir)
-                matched.add(message.id)
-        finally:
-            conn.close()
+    rows = session.iter_voice_rows(archive.conversation_id)
+    for row in rows:
+        message = None
+        if row.server_id > 0:
+            message = by_server.get(row.server_id)
+        if message is None and row.local_id > 0:
+            message = by_local.get(row.local_id)
+        if message is None or message.id in matched:
+            continue
+        target = destination / f"{archive.conversation_id}_{message.local_id}.silk"
+        target.write_bytes(row.data)
+        message.attachment = relative_attachment(target, output_dir)
+        matched.add(message.id)
     warnings = [
         f"voice is not available locally for message {message.id}"
         for message in targets
         if message.id not in matched
     ]
     if progress:
-        progress(len(media_dbs), len(media_dbs), f"Extracted {len(matched)}/{len(targets)} voices")
+        progress(len(matched), len(targets), f"Extracted {len(matched)}/{len(targets)} voices")
     return len(matched), warnings
 
 
