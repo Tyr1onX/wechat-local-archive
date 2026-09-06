@@ -16,6 +16,34 @@ from .paths import model_cache_dir, transcript_cache_dir
 ProgressCallback = Callable[[int, int, str], None]
 
 
+@dataclass(frozen=True, slots=True)
+class AsrSettings:
+    preset: str
+    batch_size: int
+    threads: int
+
+
+_ASR_PRESETS = {
+    "background": AsrSettings("background", batch_size=4, threads=2),
+    "balanced": AsrSettings("balanced", batch_size=8, threads=4),
+    "fast": AsrSettings("fast", batch_size=16, threads=8),
+}
+
+
+def resolve_asr_settings(preset: str = "balanced", batch_size: int | None = None) -> AsrSettings:
+    try:
+        base = _ASR_PRESETS[preset]
+    except KeyError as exc:
+        raise ValueError(f"Unknown ASR preset: {preset}") from exc
+    if batch_size is not None and batch_size < 1:
+        raise ValueError("batch size must be at least 1")
+    return AsrSettings(
+        preset=base.preset,
+        batch_size=batch_size if batch_size is not None else base.batch_size,
+        threads=base.threads,
+    )
+
+
 class TranscriptionError(RuntimeError):
     pass
 
@@ -67,14 +95,18 @@ class SenseVoiceTranscriber:
     def __init__(
         self,
         model_name: str = "iic/SenseVoiceSmall-onnx",
-        batch_size: int = 16,
+        preset: str = "balanced",
+        batch_size: int | None = None,
         cache: TranscriptCache | None = None,
         model_factory=None,
         postprocess=None,
         model_dir: Path | None = None,
     ) -> None:
         self.model_name = model_name
-        self.batch_size = max(1, batch_size)
+        self.settings = resolve_asr_settings(preset, batch_size)
+        self.preset = self.settings.preset
+        self.batch_size = self.settings.batch_size
+        self.intra_op_num_threads = self.settings.threads
         self.cache = cache or TranscriptCache()
         self._model_factory = model_factory
         self._postprocess = postprocess
@@ -203,7 +235,7 @@ class SenseVoiceTranscriber:
                 str(prepared),
                 batch_size=self.batch_size,
                 quantize=True,
-                intra_op_num_threads=min(8, os.cpu_count() or 4),
+                intra_op_num_threads=min(self.intra_op_num_threads, os.cpu_count() or self.intra_op_num_threads),
             )
         except Exception as exc:
             raise TranscriptionError(f"Unable to initialize SenseVoiceSmall: {exc}") from exc

@@ -121,6 +121,22 @@ wechat-archive export <username> --out D:\Archives\chat --media all
 wechat-archive export <username> --out D:\Archives\chat --media all --transcribe
 ```
 
+默认 ASR 档位是 `balanced`。只需要选择资源档位，不需要直接理解 ONNX 参数：
+
+```text
+background  batch=4   threads=2   # 边工作边后台归档
+balanced    batch=8   threads=4   # 默认
+fast        batch=16  threads=8   # 首次大量归档
+```
+
+例如低占用后台转写：
+
+```powershell
+wechat-archive export <username> --out D:\Archives\chat --media all --transcribe --asr-preset background
+```
+
+`--batch-size` 仍保留为高级 override，但不会改变所选 preset 的线程上限。已有档案没有待转写语音时不会初始化 SenseVoice 模型。
+
 同一输出目录再次执行时默认是**增量、幂等更新**：已有消息不会重复追加，存在的附件不会重新复制/解密，已有语音转写不会重新推理；如果旧消息的附件后来才落到本机，也会只补齐缺失项。需要明确全量重建时使用：
 
 ```powershell

@@ -8,6 +8,7 @@ from .archive import parse_date
 from .exporter import export_chat
 from .source import SourceError, bootstrap, discover_accounts, open_offline, resolve_chat
 from .state import clear_state, load_config, load_secret
+from .transcribe import resolve_asr_settings
 from .verify import verify_archive
 
 
@@ -36,7 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--end", default=None, help="YYYY-MM-DD")
     export.add_argument("--media", choices=("none", "voice", "all"), default="none")
     export.add_argument("--transcribe", action="store_true", help="Batch-transcribe extracted voice with SenseVoiceSmall")
-    export.add_argument("--batch-size", type=int, default=16)
+    export.add_argument("--asr-preset", choices=("background", "balanced", "fast"), default="balanced")
+    export.add_argument("--batch-size", type=int, default=None, help="Advanced batch-size override for the selected ASR preset")
     export.add_argument("--refresh", action="store_true", help="Rebuild the selected archive instead of incrementally updating it")
 
     verify = sub.add_parser("verify", help="Verify one archive directory and its attachment references")
@@ -137,8 +139,12 @@ def _export(args) -> int:
     end = parse_date(args.end)
     if start and end and start > end:
         raise ValueError("start date must not be after end date")
-    if args.batch_size < 1:
-        raise ValueError("batch size must be at least 1")
+    settings = resolve_asr_settings(args.asr_preset, args.batch_size)
+    if args.transcribe:
+        print(
+            f"ASR preset: {settings.preset} "
+            f"(batch={settings.batch_size}, threads={settings.threads})"
+        )
 
     def progress(current: int, total: int, label: str) -> None:
         if total > 0:
@@ -157,6 +163,7 @@ def _export(args) -> int:
             end=end,
             media=args.media,
             transcribe=args.transcribe,
+            asr_preset=args.asr_preset,
             batch_size=args.batch_size,
             refresh=args.refresh,
             progress=progress,

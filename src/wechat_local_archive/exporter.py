@@ -44,7 +44,8 @@ def export_chat(
     end: date | None = None,
     media: str = "none",
     transcribe: bool = False,
-    batch_size: int = 16,
+    asr_preset: str = "balanced",
+    batch_size: int | None = None,
     refresh: bool = False,
     progress=None,
 ) -> ExportSummary:
@@ -102,7 +103,7 @@ def export_chat(
 
     before_transcripts = sum(1 for message in archive.messages if message.transcript)
     if transcribe and _has_pending_transcription(archive, output_dir):
-        transcriber = SenseVoiceTranscriber(batch_size=batch_size)
+        transcriber = SenseVoiceTranscriber(preset=asr_preset, batch_size=batch_size)
         _new_transcripts, voice_warnings = transcriber.transcribe_messages(
             archive.messages,
             archive_root=output_dir,
