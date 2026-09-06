@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import wechat_local_archive.exporter as exporter_module
 from wechat_local_archive.exporter import export_chat
 from wechat_local_archive.source import VoiceRow
 
@@ -211,6 +212,52 @@ def test_refresh_forces_full_rebuild(tmp_path: Path) -> None:
     )
 
     assert session.export_calls == 2
+
+
+def test_atomic_output_replaces_archive_last(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _FakeSession()
+    first = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+    old_archive = first.archive_path.read_bytes()
+    session.messages.append(
+        {
+            "chat": "wxid_friend",
+            "local_id": 2,
+            "server_id": 11,
+            "sort_seq": 2,
+            "create_time": 1_725_264_100,
+            "sender_name": "朋友",
+            "type": "文本",
+            "type_code": 1,
+            "content": "新增",
+        }
+    )
+    session.changed = True
+    original_replace = exporter_module.os.replace
+    calls = 0
+
+    def fail_archive_replace(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated interruption before canonical archive replace")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(exporter_module.os, "replace", fail_archive_replace)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        export_chat(
+            session,  # type: ignore[arg-type]
+            conversation_id="wxid_friend",
+            conversation_name="朋友",
+            output_dir=tmp_path,
+        )
+
+    assert first.archive_path.read_bytes() == old_archive
+    json.loads(first.archive_path.read_text(encoding="utf-8"))
 
 
 def test_complete_voice_transcript_does_not_initialize_asr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

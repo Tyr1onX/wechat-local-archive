@@ -8,6 +8,7 @@ from .archive import parse_date
 from .exporter import export_chat
 from .source import SourceError, bootstrap, discover_accounts, open_offline, resolve_chat
 from .state import clear_state, load_config, load_secret
+from .verify import verify_archive
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--batch-size", type=int, default=16)
     export.add_argument("--refresh", action="store_true", help="Rebuild the selected archive instead of incrementally updating it")
 
+    verify = sub.add_parser("verify", help="Verify one archive directory and its attachment references")
+    verify.add_argument("archive_dir", type=Path)
+    verify.add_argument("--prune-orphans", action="store_true", help="Delete unreferenced files under assets/ after a successful verification")
+
     sub.add_parser("reset", help="Remove saved config and DPAPI-protected master key")
     return parser
 
@@ -53,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
             return _chats(args)
         if args.command == "export":
             return _export(args)
+        if args.command == "verify":
+            return _verify(args)
         if args.command == "reset":
             clear_state()
             print("Local bootstrap state removed.")
@@ -106,6 +113,23 @@ def _chats(args) -> int:
     for item in chats[: max(0, args.limit)]:
         print(f"{item.get('message_count', 0):>7}  {item.get('name', '')}  [{item.get('username', '')}]")
     return 0
+
+
+def _verify(args) -> int:
+    result = verify_archive(args.archive_dir, prune_orphans=args.prune_orphans)
+    print(f"archive: {result.root}")
+    print(f"status: {'PASS' if result.ok else 'FAIL'}")
+    print(f"messages: {result.message_count}")
+    print(f"attachments: {result.attachment_count}")
+    print(f"voice transcripts: {result.voice_transcript_count}/{result.voice_count}")
+    print(f"orphans: {result.orphan_count}")
+    if result.pruned_count:
+        print(f"pruned: {result.pruned_count}")
+    for warning in result.warnings:
+        print(f"warning: {warning}")
+    for error in result.errors:
+        print(f"error: {error}", file=sys.stderr)
+    return 0 if result.ok else 2
 
 
 def _export(args) -> int:

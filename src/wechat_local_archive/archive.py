@@ -150,7 +150,6 @@ def archive_from_dict(payload: dict) -> Archive:
                 transcript=str(raw.get("transcript") or "") or None,
             )
         )
-    messages.sort(key=lambda item: (item.timestamp_unix, item.sort_seq, item.local_id))
     return Archive(
         schema_version=schema_version,
         exported_at=str(payload.get("exported_at") or ""),

@@ -118,6 +118,20 @@ wechat-archive export <username> --out D:\Archives\chat --media all --transcribe
 
 `archive.json` 的账号、会话或日期范围与本次请求不匹配时会拒绝合并，避免把两个档案混在一起。
 
+导出完成后可检查档案完整性：
+
+```powershell
+wechat-archive verify D:\Archives\chat
+```
+
+它会检查 schema、账号/会话元信息、重复消息、时间顺序、附件路径/缺失文件、`chat.md` 一致性，并报告语音转写覆盖率和未引用的 assets。孤儿附件默认不会删除；确认档案本身验证通过后可显式清理：
+
+```powershell
+wechat-archive verify D:\Archives\chat --prune-orphans
+```
+
+`archive.json` 与 `chat.md` 都通过临时文件 + atomic replace 更新，其中 `archive.json` 作为真源最后替换；长任务中断不会把旧的 canonical archive 覆盖成半文件。
+
 第一次转写会下载约 242 MB 的 SenseVoiceSmall INT8 ONNX 模型；之后可离线运行。
 
 ## 输出

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -114,10 +115,9 @@ def export_chat(
     if modified:
         archive.schema_version = CURRENT_SCHEMA_VERSION
         archive.exported_at = datetime.now().astimezone().isoformat(timespec="seconds")
-        _write_json(archive_path, archive)
-        _write_markdown(markdown_path, archive)
+        _write_outputs_atomic(archive_path, markdown_path, archive)
     elif not markdown_path.is_file():
-        _write_markdown(markdown_path, archive)
+        _write_markdown_atomic(markdown_path, archive)
 
     return ExportSummary(
         archive_path=archive_path,
@@ -469,16 +469,44 @@ def _materialize_voices_bulk(
     return len(matched), warnings
 
 
-def _write_json(path: Path, archive: Archive) -> None:
-    temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(
-        json.dumps(archive.to_dict(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+def _write_outputs_atomic(archive_path: Path, markdown_path: Path, archive: Archive) -> None:
+    archive_temp = archive_path.with_name(archive_path.name + ".tmp")
+    markdown_temp = markdown_path.with_name(markdown_path.name + ".tmp")
+    try:
+        archive_temp.write_text(
+            json.dumps(archive.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        markdown_temp.write_text(render_markdown(archive), encoding="utf-8")
+        # archive.json is the canonical source of truth, so replace it last. If the
+        # process dies between replacements, the previous canonical archive remains valid.
+        os.replace(markdown_temp, markdown_path)
+        os.replace(archive_temp, archive_path)
+    except OSError as exc:
+        raise RuntimeError(f"Unable to atomically update archive outputs: {exc}") from exc
+    finally:
+        for temporary in (archive_temp, markdown_temp):
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
-def _write_markdown(path: Path, archive: Archive) -> None:
+def _write_markdown_atomic(path: Path, archive: Archive) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        temporary.write_text(render_markdown(archive), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise RuntimeError(f"Unable to atomically update chat.md: {exc}") from exc
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def render_markdown(archive: Archive) -> str:
     lines = [
         f"# {archive.conversation_name}",
         "",
@@ -499,7 +527,7 @@ def _write_markdown(path: Path, archive: Archive) -> None:
             else:
                 lines.extend(["", f"[附件]({message.attachment})"])
         lines.append("")
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _display_sender(archive: Archive, message) -> str:
