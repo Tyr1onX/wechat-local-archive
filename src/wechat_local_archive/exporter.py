@@ -152,6 +152,10 @@ def export_chat(
     from .ai_export import rebuild_ai_jsonl
 
     rebuild_ai_jsonl(output_dir)
+    from .html_export import rebuild_html
+
+    _, html_warnings = rebuild_html(output_dir, progress=progress, cancel=cancel)
+    warnings.extend(html_warnings)
 
     return ExportSummary(
         archive_path=archive_path,

@@ -18,4 +18,6 @@ xwechat_files/
 **/secrets.dpapi
 **/archive.json
 **/chat.md
+**/ai.jsonl
+**/chat.html
 **/assets/

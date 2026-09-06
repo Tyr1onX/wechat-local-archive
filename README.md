@@ -189,14 +189,37 @@ wechat-archive verify D:\Archives\chat --prune-orphans
 
 ```text
 chat/
-├─ archive.json        # 稳定结构化档案
-├─ chat.md             # 人类可读版本
+├─ archive.json        # 唯一稳定数据源
+├─ chat.md             # 文本阅读
+├─ ai.jsonl            # AI 分析用精简输出
+├─ chat.html           # 双击即可打开的离线阅读器
 └─ assets/
    ├─ image/
-   ├─ voice/
+   ├─ voice/           # 原始 SILK
+   ├─ reader-audio/    # 浏览器播放用 MP3 派生缓存
    ├─ video/
    └─ file/
 ```
+
+### 离线 HTML 阅读器
+
+正常导出会同时生成 `chat.html`。直接双击即可在 Chrome/Edge 打开，不需要本地服务器、前端构建工具或网络连接。支持左右消息、日期分隔、全文搜索、月份/日期跳转和每页 80 条的分页；图片、视频、文件仍从本地 `assets/` 读取。
+
+已有档案可单独重建，不读取微信数据库，也不会重新运行 ASR：
+
+```powershell
+wechat-archive html D:\Archives\chat
+```
+
+原始 SILK 语音会按内容哈希转换成 48 kbps MP3，保存在 `assets/reader-audio/`；再次重建复用缓存，不修改原始语音或 `archive.json`。如果只需要阅读转写、暂时不转换音频：
+
+```powershell
+wechat-archive html D:\Archives\chat --no-audio
+```
+
+转换失败会保留转写和原始语音链接。生成的 HTML 不加载 CDN、远程字体或脚本；CSP 禁止网络连接，聊天内容按纯文本渲染。可删除 `chat.html` 和 `assets/reader-audio/` 后从 `archive.json` 重建。`verify` 会检查已有 HTML 是否与当前档案一致，孤儿文件清理不会删除阅读器音频缓存。
+
+注意：HTML 是本地阅读器，不是独立的完整备份。移动它时应连同 `assets/` 一起移动；若需保存完整记录，保留整个归档目录。发送给 AI 做文本分析仍优先使用 `ai.jsonl`。
 
 ## 隐私与风险边界
 

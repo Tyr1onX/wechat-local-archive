@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from .ai_export import rebuild_ai_jsonl
+from .html_export import rebuild_html
 from .archive import parse_date
 from .exporter import export_chat
 from .source import SourceError, bootstrap, discover_accounts, open_offline, resolve_chat
@@ -46,6 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
     ai = sub.add_parser("ai", help="Rebuild ai.jsonl from an existing archive without opening WeChat")
     ai.add_argument("archive_dir", type=Path)
 
+    reader = sub.add_parser("html", help="Rebuild the offline chat.html reader without opening WeChat")
+    reader.add_argument("archive_dir", type=Path)
+    reader.add_argument("--no-audio", action="store_true", help="Skip SILK conversion; keep transcripts and original audio links")
+
     verify = sub.add_parser("verify", help="Verify one archive directory and its attachment references")
     verify.add_argument("archive_dir", type=Path)
     verify.add_argument("--prune-orphans", action="store_true", help="Delete unreferenced files under assets/ after a successful verification")
@@ -70,6 +75,12 @@ def main(argv: list[str] | None = None) -> int:
             return _export(args)
         if args.command == "ai":
             print(f"ai: {rebuild_ai_jsonl(args.archive_dir)}")
+            return 0
+        if args.command == "html":
+            path, warnings = rebuild_html(args.archive_dir, convert_audio=not args.no_audio)
+            print(f"html: {path}")
+            for warning in warnings:
+                print(f"warning: {warning}")
             return 0
         if args.command == "verify":
             return _verify(args)

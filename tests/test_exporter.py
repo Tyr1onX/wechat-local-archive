@@ -110,6 +110,8 @@ def test_export_chat_writes_json_and_markdown(tmp_path: Path) -> None:
     assert "你好" in markdown
     assert "· 朋友" in markdown
     assert summary.message_count == 1
+    assert (tmp_path / "ai.jsonl").is_file()
+    assert (tmp_path / "chat.html").is_file()
     ai_rows = [json.loads(line) for line in (tmp_path / "ai.jsonl").read_text(encoding="utf-8").splitlines()]
     assert ai_rows == [{"time": payload["messages"][0]["timestamp"], "sender": "朋友", "type": "text", "text": "你好"}]
 

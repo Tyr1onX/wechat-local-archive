@@ -135,6 +135,17 @@ def test_verify_detects_stale_markdown(tmp_path: Path) -> None:
     assert any("chat.md is stale" in error for error in result.errors)
 
 
+def test_verify_preserves_derived_reader_audio_cache(tmp_path: Path) -> None:
+    _valid_archive(tmp_path)
+    cache = tmp_path / "assets" / "reader-audio" / "cached.mp3"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"cached")
+    result = verify_archive(tmp_path, prune_orphans=True)
+    assert result.ok
+    assert result.orphan_count == 0
+    assert cache.read_bytes() == b"cached"
+
+
 def test_verify_prunes_orphans_only_when_archive_is_valid(tmp_path: Path) -> None:
     _valid_archive(tmp_path)
     orphan = tmp_path / "assets" / "orphan.bin"

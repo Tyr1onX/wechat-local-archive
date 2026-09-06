@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-__READER_SCRIPT_HASH__'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'none'; font-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<title>__READER_TITLE__ · 聊天归档</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;color-scheme:light dark;--bg:#f5f5f3;--surface:#fff;--ink:#242424;--muted:#777;--line:#dededb;--mine:#e8ece8;--focus:#426c56}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6}button,input,select{font:inherit;color:inherit}button,input,select{border:1px solid var(--line);border-radius:5px;background:var(--surface);padding:7px 10px}button{cursor:pointer}button:disabled{opacity:.35;cursor:default}:focus-visible{outline:2px solid var(--focus);outline-offset:2px}header{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line)}.shell{max-width:900px;margin:auto;padding:12px 20px}.heading{display:flex;justify-content:space-between;gap:12px;align-items:baseline}.heading h1{font-size:17px;font-weight:600;margin:0;overflow-wrap:anywhere}.muted{color:var(--muted);font-size:12px}.toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}.toolbar input[type=search]{flex:1 1 220px;min-width:0}.toolbar select{max-width:220px}.toolbar input[type=date]{max-width:160px}main{max-width:900px;margin:auto;padding:20px 20px 36px}.day{text-align:center;color:var(--muted);font-size:12px;margin:20px 0}.message{display:flex;flex-direction:column;align-items:flex-start;margin:12px 0}.message.mine{align-items:flex-end}.message.system{align-items:center}.sender{font-size:11px;color:var(--muted);margin:0 6px 4px}.bubble{max-width:min(82%,610px);min-width:0;padding:9px 12px;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow-wrap:anywhere}.mine .bubble{background:var(--mine)}.system .bubble{background:transparent;border:0;text-align:center;color:var(--muted);font-size:12px}.content{white-space:pre-wrap;overflow-wrap:anywhere}.time{font-size:10px;color:var(--muted);margin-top:5px;text-align:right;font-variant-numeric:tabular-nums}.bubble img{display:block;max-width:100%;max-height:420px;object-fit:contain;border-radius:3px;margin-top:6px}.bubble video{display:block;width:100%;max-height:420px;margin-top:6px}.bubble audio{display:block;width:min(100%,330px);height:42px;margin-top:6px}a{color:var(--focus);text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}.asset{display:block;margin-top:6px;font-size:12px}.pager{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:10px;padding:14px 0}.empty{text-align:center;color:var(--muted);padding:56px 0}.hidden{display:none!important}@media(max-width:600px){.shell{padding:10px 12px}main{padding:12px 10px}.heading{display:block}.toolbar{gap:6px}.toolbar select{max-width:100%}.bubble{max-width:90%}}@media(prefers-color-scheme:dark){:root{--bg:#171918;--surface:#242725;--ink:#e5e8e4;--muted:#a1a7a1;--line:#3b403c;--mine:#2c3930;--focus:#a9d4b2}}
+</style>
+</head>
+<body>
+<header><div class="shell"><div class="heading"><h1 id="title">__READER_TITLE__</h1><span class="muted" id="total"></span></div><div class="toolbar"><input id="search" type="search" placeholder="搜索聊天内容 / 发送者" aria-label="搜索聊天内容"><select id="month" aria-label="选择月份"><option value="">全部月份</option></select><input id="date" type="date" aria-label="跳转日期"><button id="jump">跳转</button><button id="latest">最新</button></div></div></header>
+<main><div id="messages" aria-live="off"></div><div id="empty" class="empty hidden">没有匹配的消息</div><nav class="pager" aria-label="消息分页"><button id="previous">上一页</button><span id="page" class="muted" aria-live="polite"></span><button id="next">下一页</button></nav></main>
+<script id="reader-data" type="application/json">__READER_DATA__</script>
+<script id="reader-code">
+(()=>{
+"use strict";
+const data=JSON.parse(document.getElementById("reader-data").textContent);
+const rows=data.messages, size=80;
+const $=id=>document.getElementById(id);
+let matches=rows.map((_,i)=>i),page=0;
+const search=$("search"),month=$("month"),date=$("date"),list=$("messages");
+$("title").textContent=data.title;
+$("total").textContent=`${rows.length.toLocaleString()} 条消息`;
+const months=[...new Set(rows.map(row=>row.time.slice(0,7)))].sort();
+for(const value of months){const option=document.createElement("option");option.value=value;option.textContent=value;month.append(option)}
+function asset(path){if(typeof path!=="string"||!path)return null;try{const parts=path.split("/").map(decodeURIComponent);if(parts.some(p=>!p||p==="."||p===".."||p.includes("\\")||p.includes(":")||p.includes("/")||/\p{Cc}/u.test(p)))return null;const url=new URL(parts.map(encodeURIComponent).join("/"),location.href);if(url.protocol!=="file:"||url.origin!==location.origin)return null;return url.href}catch{return null}}
+function link(path,label){const url=asset(path);if(!url)return null;const a=document.createElement("a");a.href=url;a.textContent=label;a.className="asset";a.rel="noreferrer";return a}
+function element(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node}
+function message(row){const wrapper=element("article","message "+(row.sender==="我"?"mine":row.type==="system"?"system":""));wrapper.append(element("div","sender",row.sender));const bubble=element("div","bubble");bubble.append(element("div","content",row.text));const source=asset(row.asset),audio=asset(row.audio);
+if(row.type==="image"&&source){const img=document.createElement("img");img.src=source;img.alt="聊天图片";img.loading="lazy";img.decoding="async";bubble.append(img)}
+else if(row.type==="video"&&source){const video=document.createElement("video");video.controls=true;video.preload="none";video.src=source;bubble.append(video)}
+else if(row.type==="voice"&&audio){const player=document.createElement("audio");player.controls=true;player.preload="none";player.src=audio;bubble.append(player)}
+if(source){const a=link(row.asset,row.type==="voice"?"原始语音":row.type==="image"?"打开原图":row.type==="video"?"打开视频":"打开附件");if(a)bubble.append(a)}
+bubble.append(element("div","time",row.time.slice(11,16)));wrapper.append(bubble);return wrapper}
+function render(){const pages=Math.ceil(matches.length/size);page=Math.max(0,Math.min(page,pages-1));const start=page*size,end=Math.min(start+size,matches.length);const fragment=document.createDocumentFragment();let day="";for(const index of matches.slice(start,end)){const row=rows[index],value=row.time.slice(0,10);if(value!==day){fragment.append(element("div","day",value));day=value}fragment.append(message(row))}list.replaceChildren(fragment);$("empty").classList.toggle("hidden",matches.length!==0);$("page").textContent=matches.length?`${start+1}–${end} / ${matches.length.toLocaleString()}`:"0 / 0";$("previous").disabled=page===0;$("next").disabled=page>=pages-1;}
+function filter(){const needle=search.value.trim().toLocaleLowerCase(),selected=month.value;matches=[];for(let i=0;i<rows.length;i++){const row=rows[i];if(selected&&!row.time.startsWith(selected))continue;if(needle&&!`${row.text}\n${row.sender}`.toLocaleLowerCase().includes(needle))continue;matches.push(i)}page=needle||selected?0:Math.max(0,Math.ceil(matches.length/size)-1);render()}
+function jump(){const value=date.value;if(!value)return;month.value="";search.value="";matches=rows.map((_,i)=>i);let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(rows[mid].time.slice(0,10)<value)lo=mid+1;else hi=mid}page=Math.floor(Math.min(lo,Math.max(0,rows.length-1))/size);render();window.scrollTo(0,0)}
+search.addEventListener("input",filter);month.addEventListener("change",filter);$("jump").addEventListener("click",jump);date.addEventListener("change",jump);$("latest").addEventListener("click",()=>{search.value="";month.value="";date.value="";filter();window.scrollTo(0,0)});$("previous").addEventListener("click",()=>{page--;render();window.scrollTo(0,0)});$("next").addEventListener("click",()=>{page++;render();window.scrollTo(0,0)});filter();
+})();
+</script>
+</body>
+</html>

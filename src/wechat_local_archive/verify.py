@@ -8,6 +8,7 @@ from pathlib import Path
 from .ai_export import AI_FILENAME, iter_ai_rows
 from .archive import Archive, archive_from_dict, selected_media_type
 from .exporter import render_markdown
+from .html_export import HTML_FILENAME, render_html
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +122,15 @@ def verify_archive(root: Path, prune_orphans: bool = False) -> VerifyResult:
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             errors.append(f"ai.jsonl is unreadable or invalid: {exc}")
 
+    html_path = root / HTML_FILENAME
+    if html_path.is_file():
+        try:
+            expected_html, _ = render_html(archive, root, convert_audio=False)
+            if html_path.read_text(encoding="utf-8") != expected_html:
+                errors.append("chat.html is stale or does not match archive.json")
+        except (OSError, UnicodeError, ValueError) as exc:
+            errors.append(f"chat.html is unreadable or invalid: {exc}")
+
     orphan_paths = _find_orphans(root, referenced_assets)
     pruned_count = 0
     if prune_orphans:
@@ -153,7 +163,9 @@ def _find_orphans(root: Path, referenced_assets: set[Path]) -> list[Path]:
     return sorted(
         path
         for path in assets_root.rglob("*")
-        if path.is_file() and path.resolve() not in referenced_assets
+        if path.is_file()
+        and path.relative_to(assets_root).parts[0] != "reader-audio"
+        and path.resolve() not in referenced_assets
     )
 
 
