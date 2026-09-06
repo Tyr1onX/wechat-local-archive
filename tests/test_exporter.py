@@ -57,6 +57,7 @@ def test_cancelled_export_preserves_existing_archive(tmp_path: Path) -> None:
     first = export_chat(session, conversation_id="wxid_friend", conversation_name="朋友", output_dir=tmp_path)
     original_json = first.archive_path.read_bytes()
     original_md = first.markdown_path.read_bytes()
+    original_ai = (tmp_path / "ai.jsonl").read_bytes()
     session.messages.append({
         "chat": "wxid_friend", "local_id": 2, "server_id": 11, "sort_seq": 2,
         "create_time": 1_725_264_100, "sender_name": "朋友", "type": "voice",
@@ -74,6 +75,7 @@ def test_cancelled_export_preserves_existing_archive(tmp_path: Path) -> None:
                     output_dir=tmp_path, media="voice", progress=progress, cancel=token.check)
     assert first.archive_path.read_bytes() == original_json
     assert first.markdown_path.read_bytes() == original_md
+    assert (tmp_path / "ai.jsonl").read_bytes() == original_ai
 
 
 def test_selected_media_types_are_independent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,6 +110,8 @@ def test_export_chat_writes_json_and_markdown(tmp_path: Path) -> None:
     assert "你好" in markdown
     assert "· 朋友" in markdown
     assert summary.message_count == 1
+    ai_rows = [json.loads(line) for line in (tmp_path / "ai.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert ai_rows == [{"time": payload["messages"][0]["timestamp"], "sender": "朋友", "type": "text", "text": "你好"}]
 
 
 def test_unchanged_second_export_does_not_read_full_history_or_rewrite(tmp_path: Path) -> None:
@@ -122,6 +126,9 @@ def test_unchanged_second_export_does_not_read_full_history_or_rewrite(tmp_path:
     markdown_before = first.markdown_path.read_bytes()
     archive_mtime = first.archive_path.stat().st_mtime_ns
     markdown_mtime = first.markdown_path.stat().st_mtime_ns
+    ai_path = tmp_path / "ai.jsonl"
+    ai_before = ai_path.read_bytes()
+    ai_mtime = ai_path.stat().st_mtime_ns
 
     second = export_chat(
         session,  # type: ignore[arg-type]
@@ -136,6 +143,8 @@ def test_unchanged_second_export_does_not_read_full_history_or_rewrite(tmp_path:
     assert first.markdown_path.read_bytes() == markdown_before
     assert first.archive_path.stat().st_mtime_ns == archive_mtime
     assert first.markdown_path.stat().st_mtime_ns == markdown_mtime
+    assert ai_path.read_bytes() == ai_before
+    assert ai_path.stat().st_mtime_ns == ai_mtime
 
 
 def test_incremental_export_merges_new_messages_without_duplicates(tmp_path: Path) -> None:
@@ -233,6 +242,20 @@ def test_missing_voice_attachment_is_repaired_without_full_history_reload(tmp_pa
     assert session.voice_reads == 2
     assert attachment.read_bytes() == b"silk"
     assert second.attachment_count == 1
+
+
+def test_unchanged_export_repairs_derived_ai_without_source_work(tmp_path: Path) -> None:
+    session = _FakeSession()
+    first = export_chat(session, conversation_id="wxid_friend", conversation_name="朋友", output_dir=tmp_path)
+    original = first.archive_path.read_bytes()
+    ai_path = tmp_path / "ai.jsonl"
+    ai_path.write_text("stale\n", encoding="utf-8")
+
+    export_chat(session, conversation_id="wxid_friend", conversation_name="朋友", output_dir=tmp_path)
+
+    assert session.export_calls == 1
+    assert first.archive_path.read_bytes() == original
+    assert json.loads(ai_path.read_text(encoding="utf-8").splitlines()[0])["text"] == "你好"
 
 
 def test_refresh_forces_full_rebuild(tmp_path: Path) -> None:

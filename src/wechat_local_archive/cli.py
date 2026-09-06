@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .ai_export import rebuild_ai_jsonl
 from .archive import parse_date
 from .exporter import export_chat
 from .source import SourceError, bootstrap, discover_accounts, open_offline, resolve_chat
@@ -42,6 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--batch-size", type=int, default=None, help="Advanced batch-size override for the selected ASR preset")
     export.add_argument("--refresh", action="store_true", help="Rebuild the selected archive instead of incrementally updating it")
 
+    ai = sub.add_parser("ai", help="Rebuild ai.jsonl from an existing archive without opening WeChat")
+    ai.add_argument("archive_dir", type=Path)
+
     verify = sub.add_parser("verify", help="Verify one archive directory and its attachment references")
     verify.add_argument("archive_dir", type=Path)
     verify.add_argument("--prune-orphans", action="store_true", help="Delete unreferenced files under assets/ after a successful verification")
@@ -64,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
             return _chats(args)
         if args.command == "export":
             return _export(args)
+        if args.command == "ai":
+            print(f"ai: {rebuild_ai_jsonl(args.archive_dir)}")
+            return 0
         if args.command == "verify":
             return _verify(args)
         if args.command == "reset":
@@ -174,6 +181,7 @@ def _export(args) -> int:
         )
     print(f"archive: {summary.archive_path}")
     print(f"markdown: {summary.markdown_path}")
+    print(f"ai: {summary.archive_path.with_name('ai.jsonl')}")
     print(f"messages: {summary.message_count}")
     print(f"attachments: {summary.attachment_count}")
     print(f"transcripts: {summary.transcript_count}")

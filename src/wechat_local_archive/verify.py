@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from itertools import zip_longest
 from pathlib import Path
 
+from .ai_export import AI_FILENAME, iter_ai_rows
 from .archive import Archive, archive_from_dict, selected_media_type
 from .exporter import render_markdown
 
@@ -107,6 +109,17 @@ def verify_archive(root: Path, prune_orphans: bool = False) -> VerifyResult:
                 errors.append("chat.md is stale or does not match archive.json")
         except OSError as exc:
             errors.append(f"chat.md is unreadable: {exc}")
+
+    ai_path = root / AI_FILENAME
+    if ai_path.is_file():
+        try:
+            with ai_path.open("r", encoding="utf-8") as stream:
+                actual_rows = (json.loads(line) for line in stream)
+                expected_rows = iter_ai_rows(archive, root)
+                if any(actual != expected for actual, expected in zip_longest(actual_rows, expected_rows)):
+                    errors.append("ai.jsonl is stale or does not match archive.json")
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            errors.append(f"ai.jsonl is unreadable or invalid: {exc}")
 
     orphan_paths = _find_orphans(root, referenced_assets)
     pruned_count = 0

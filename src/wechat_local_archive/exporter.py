@@ -147,6 +147,12 @@ def export_chat(
     elif not markdown_path.is_file():
         _write_markdown_atomic(markdown_path, archive)
 
+    # AI output is derived from the committed archive, never an independent source.
+    # Rebuild missing/stale output even when the incremental source has not changed.
+    from .ai_export import rebuild_ai_jsonl
+
+    rebuild_ai_jsonl(output_dir)
+
     return ExportSummary(
         archive_path=archive_path,
         markdown_path=markdown_path,
