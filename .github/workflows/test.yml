@@ -37,5 +37,8 @@ jobs:
         run: |
           .\.venv-ci\Scripts\python.exe -m wechat_local_archive --help
           .\.venv-ci\Scripts\python.exe -m wechat_local_archive doctor
+          .\.venv-ci\Scripts\python.exe -m wechat_local_archive gui --help
+      - name: GUI smoke
+        run: .\.venv-ci\Scripts\python.exe -m pytest tests/test_gui.py --basetemp=.pytest-tmp-gui
       - name: Diff check
         run: git diff --check

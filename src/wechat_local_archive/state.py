@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .paths import app_data_dir, config_path, secret_path
+from .paths import app_data_dir, config_path, secret_path, ui_config_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +20,12 @@ class SecretState:
     db_keys: dict[str, str]
     cfg_dword: int | None = None
     master_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UiConfig:
+    output_root: str
+    asr_preset: str = "balanced"
 
 
 class StateError(RuntimeError):
@@ -41,6 +47,26 @@ def load_config() -> AppConfig | None:
 
 def save_config(config: AppConfig) -> None:
     _atomic_write_text(config_path(), json.dumps(asdict(config), ensure_ascii=False, indent=2))
+
+
+def load_ui_config() -> UiConfig | None:
+    try:
+        payload = json.loads(ui_config_path().read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    output_root = str(payload.get("output_root") or "").strip()
+    asr_preset = str(payload.get("asr_preset") or "balanced").strip()
+    if not output_root or asr_preset not in {"background", "balanced", "fast"}:
+        return None
+    return UiConfig(output_root=output_root, asr_preset=asr_preset)
+
+
+def save_ui_config(config: UiConfig) -> None:
+    if config.asr_preset not in {"background", "balanced", "fast"}:
+        raise ValueError(f"Unknown ASR preset: {config.asr_preset}")
+    _atomic_write_text(ui_config_path(), json.dumps(asdict(config), ensure_ascii=False, indent=2))
 
 
 def load_secret() -> SecretState | None:

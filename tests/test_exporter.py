@@ -7,6 +7,7 @@ import pytest
 
 import wechat_local_archive.exporter as exporter_module
 from wechat_local_archive.exporter import export_chat
+from wechat_local_archive.cancellation import CancellationToken, ExportCancelled
 from wechat_local_archive.source import VoiceRow
 
 
@@ -49,6 +50,46 @@ class _FakeSession:
         self.voice_reads += 1
         yield VoiceRow(local_id=1, server_id=10, data=b"silk")
 
+
+
+def test_cancelled_export_preserves_existing_archive(tmp_path: Path) -> None:
+    session = _FakeSession()
+    first = export_chat(session, conversation_id="wxid_friend", conversation_name="朋友", output_dir=tmp_path)
+    original_json = first.archive_path.read_bytes()
+    original_md = first.markdown_path.read_bytes()
+    session.messages.append({
+        "chat": "wxid_friend", "local_id": 2, "server_id": 11, "sort_seq": 2,
+        "create_time": 1_725_264_100, "sender_name": "朋友", "type": "voice",
+        "type_code": 34, "content": "",
+    })
+    session.changed = True
+    token = CancellationToken()
+
+    def progress(current, total, label):
+        if label.startswith("Extracting voices"):
+            token.cancel()
+
+    with pytest.raises(ExportCancelled):
+        export_chat(session, conversation_id="wxid_friend", conversation_name="朋友",
+                    output_dir=tmp_path, media="voice", progress=progress, cancel=token.check)
+    assert first.archive_path.read_bytes() == original_json
+    assert first.markdown_path.read_bytes() == original_md
+
+
+def test_selected_media_types_are_independent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _FakeSession()
+    session.messages.append({
+        "chat": "wxid_friend", "local_id": 2, "server_id": 11, "sort_seq": 2,
+        "create_time": 1_725_264_100, "sender_name": "朋友", "type": "voice",
+        "type_code": 34, "content": "",
+    })
+    summary = export_chat(session, conversation_id="wxid_friend", conversation_name="朋友",
+                          output_dir=tmp_path, media_types=frozenset({3}))
+    assert summary.attachment_count == 0
+    assert session.voice_reads == 0
+    with pytest.raises(ValueError, match="Voice must be selected"):
+        export_chat(session, conversation_id="wxid_friend", conversation_name="朋友",
+                    output_dir=tmp_path, media_types=frozenset({3}), transcribe=True)
 
 
 def test_export_chat_writes_json_and_markdown(tmp_path: Path) -> None:

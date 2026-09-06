@@ -21,6 +21,10 @@ def secret_path() -> Path:
     return app_data_dir() / "secrets.dpapi"
 
 
+def ui_config_path() -> Path:
+    return app_data_dir() / "ui.json"
+
+
 def transcript_cache_dir() -> Path:
     return app_data_dir() / "transcripts"
 

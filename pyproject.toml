@@ -28,6 +28,9 @@ dev = [
 [project.scripts]
 wechat-archive = "wechat_local_archive.cli:main"
 
+[project.gui-scripts]
+wechat-archive-gui = "wechat_local_archive.gui:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/wechat_local_archive"]
 

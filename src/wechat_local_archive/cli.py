@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Read-only local WeChat 4.x archive exporter.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("gui", help="Open the minimal desktop archive window")
 
     doctor = sub.add_parser("doctor", help="Check local data discovery and offline bootstrap state")
     doctor.add_argument("--db-dir", default=None)
@@ -52,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "gui":
+            from .gui import main as gui_main
+            return gui_main()
         if args.command == "doctor":
             return _doctor(args)
         if args.command == "bootstrap":

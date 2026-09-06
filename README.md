@@ -72,6 +72,14 @@ py -3.12 -m venv .venv
 uv pip compile pyproject.toml --extra voice --extra dev --python-version 3.12 --python-platform windows --output-file requirements-win.lock
 ```
 
+## 图形界面
+
+安装后运行 `wechat-archive-gui`，或使用 `wechat-archive gui`。界面使用 Windows 自带的 tkinter/ttk，不需要 Electron、WebView 或额外 GUI 运行时。若 Python 提示缺少 tkinter，请安装包含 Tcl/Tk 的完整 Python 3.12。
+
+一个窗口即可完成：首次选择本地账号并初始化、搜索会话、填写可选日期范围、选择图片/语音/视频文件、选择语音转写资源档位、导出、验证和打开文件夹。默认输出到“下载\wechat-local-archive”，可自行修改。已有匹配的旧归档会复用；新归档使用稳定的会话 ID 目录，避免同名联系人混淆。
+
+导出默认增量更新。`CANCEL` 会等待当前不可中断的数据库或模型操作结束，然后安全停止；已经完成的语音转写会保留在本地缓存，下次继续使用。关闭正在工作的窗口也会先请求取消，不会直接丢弃后台写入。窗口仅记住输出根目录和 ASR 档位。首次下载模型需要网络，之后可离线转写。
+
 ## 使用
 
 ### 1. 首次初始化

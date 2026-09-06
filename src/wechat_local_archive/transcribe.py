@@ -118,10 +118,16 @@ class SenseVoiceTranscriber:
         messages: list[ArchiveMessage],
         archive_root: Path,
         progress: ProgressCallback | None = None,
+        cancel: Callable[[], None] | None = None,
     ) -> tuple[int, list[str]]:
+        def checkpoint() -> None:
+            if cancel is not None:
+                cancel()
+
         candidates: list[tuple[int, Path]] = []
         warnings: list[str] = []
         for index, message in enumerate(messages):
+            checkpoint()
             if not message.attachment or selected_voice_type(message.type_code) != 34:
                 continue
             audio_path = (archive_root / message.attachment).resolve()
@@ -136,15 +142,19 @@ class SenseVoiceTranscriber:
         if not candidates:
             return 0, warnings
 
+        checkpoint()
         model, postprocess = self._ensure_model()
+        checkpoint()
         completed = 0
         with tempfile.TemporaryDirectory(prefix="wechat-local-voice-") as temp_name:
             temp_root = Path(temp_name)
             chunks: list[_Chunk] = []
             audio_by_message: dict[int, Path] = {}
             for current, (message_index, audio_path) in enumerate(candidates, start=1):
+                checkpoint()
                 if progress:
                     progress(current - 1, len(candidates), f"Decoding voice {current}/{len(candidates)}")
+                checkpoint()
                 try:
                     wav_path = temp_root / f"voice-{message_index:06d}.wav"
                     decode_silk_to_wav(audio_path, wav_path)
@@ -160,11 +170,17 @@ class SenseVoiceTranscriber:
                 return 0, warnings
 
             texts: dict[int, list[tuple[int, str]]] = {}
+            remaining: dict[int, int] = {}
+            failed_messages: set[int] = set()
+            for item in chunks:
+                remaining[item.message_index] = remaining.get(item.message_index, 0) + 1
             total_batches = (len(chunks) + self.batch_size - 1) // self.batch_size
             for batch_index in range(total_batches):
+                checkpoint()
                 batch = chunks[batch_index * self.batch_size : (batch_index + 1) * self.batch_size]
                 if progress:
                     progress(batch_index, total_batches, f"Transcribing batch {batch_index + 1}/{total_batches}")
+                checkpoint()
                 raw: list[object | None]
                 try:
                     values = model(
@@ -197,21 +213,29 @@ class SenseVoiceTranscriber:
                             )
                 for item, value in zip(batch, raw):
                     if value is None:
-                        continue
-                    try:
-                        text = postprocess(value).strip()
-                    except Exception:
-                        text = str(value).strip()
-                    texts.setdefault(item.message_index, []).append((item.order, text))
-
-            for message_index, pieces in texts.items():
-                transcript = "".join(text for _order, text in sorted(pieces) if text).strip()
-                if not transcript:
-                    transcript = "[语音内容未识别]"
-                message = messages[message_index]
-                message.transcript = transcript
-                self.cache.save(audio_by_message[message_index], self.model_name, transcript)
-                completed += 1
+                        failed_messages.add(item.message_index)
+                    else:
+                        try:
+                            text = postprocess(value).strip()
+                        except Exception:
+                            text = str(value).strip()
+                        texts.setdefault(item.message_index, []).append((item.order, text))
+                    remaining[item.message_index] -= 1
+                    if remaining[item.message_index] == 0:
+                        # Checkpoint each complete message, not only the entire job.
+                        # A cancelled run can reuse these transcripts on the next export.
+                        if item.message_index not in failed_messages:
+                            pieces = texts.pop(item.message_index, [])
+                            transcript = "".join(text for _order, text in sorted(pieces) if text).strip()
+                            if not transcript:
+                                transcript = "[语音内容未识别]"
+                            message = messages[item.message_index]
+                            self.cache.save(audio_by_message[item.message_index], self.model_name, transcript)
+                            message.transcript = transcript
+                            completed += 1
+                        else:
+                            texts.pop(item.message_index, None)
+                checkpoint()
             if progress:
                 progress(total_batches, total_batches, f"Transcribed {completed} voice messages")
         return completed, warnings

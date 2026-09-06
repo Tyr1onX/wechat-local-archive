@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import Callable
 
 from .archive import (
     CURRENT_SCHEMA_VERSION,
@@ -43,16 +44,39 @@ def export_chat(
     start: date | None = None,
     end: date | None = None,
     media: str = "none",
+    media_types: frozenset[int] | None = None,
     transcribe: bool = False,
     asr_preset: str = "balanced",
     batch_size: int | None = None,
     refresh: bool = False,
     progress=None,
+    cancel: Callable[[], None] | None = None,
 ) -> ExportSummary:
+    def checkpoint() -> None:
+        if cancel is not None:
+            cancel()
+
+    original_progress = progress
+    if cancel is not None:
+        def report(current: int, total: int, label: str) -> None:
+            checkpoint()
+            if original_progress is not None:
+                original_progress(current, total, label)
+        progress = report
+
+    checkpoint()
     if media not in {"none", "voice", "all"}:
         raise ValueError("media must be one of: none, voice, all")
-    if transcribe and media == "none":
-        media = "voice"
+    if media_types is None:
+        media_types = {"none": frozenset(), "voice": frozenset({34}), "all": frozenset({3, 34, 43, 49})}[media]
+        if transcribe:
+            media_types = media_types | {34}
+    else:
+        media_types = frozenset(media_types)
+        if not media_types <= {3, 34, 43, 49}:
+            raise ValueError("Unsupported media type")
+        if transcribe and 34 not in media_types:
+            raise ValueError("Voice must be selected when transcription is enabled")
 
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +99,7 @@ def export_chat(
 
     if source_changed:
         payload = session.export_chat_payload(conversation_id)
+        checkpoint()
         fresh = normalize_payload(
             payload,
             conversation_id=conversation_id,
@@ -90,12 +115,12 @@ def export_chat(
 
     warnings: list[str] = []
     modified = source_changed
-    if media != "none":
+    if media_types:
         new_attachments, media_warnings = _materialize_media(
             session,
             archive,
             output_dir,
-            media=media,
+            media_types=media_types,
             progress=progress,
         )
         modified = modified or new_attachments > 0
@@ -108,10 +133,12 @@ def export_chat(
             archive.messages,
             archive_root=output_dir,
             progress=progress,
+            cancel=cancel,
         )
         warnings.extend(voice_warnings)
     transcript_count = sum(1 for message in archive.messages if message.transcript)
     modified = modified or transcript_count != before_transcripts
+    checkpoint()
 
     if modified:
         archive.schema_version = CURRENT_SCHEMA_VERSION
@@ -204,18 +231,15 @@ def _materialize_media(
     session: SourceSession,
     archive: Archive,
     output_dir: Path,
-    media: str,
+    media_types: frozenset[int],
     progress=None,
 ) -> tuple[int, list[str]]:
-    if media == "voice":
-        targets = [message for message in archive.messages if selected_media_type(message.type_code) == 34]
-    else:
-        targets = [
-            message
-            for message in archive.messages
-            if selected_media_type(message.type_code) in {3, 34, 43}
-            or (selected_media_type(message.type_code) == 49 and _appmsg_type(message.content) == 6)
-        ]
+    targets = [
+        message
+        for message in archive.messages
+        if selected_media_type(message.type_code) in media_types
+        and (selected_media_type(message.type_code) != 49 or _appmsg_type(message.content) == 6)
+    ]
     targets = [message for message in targets if not _attachment_exists(message, output_dir)]
     if not targets:
         return 0, []
@@ -448,7 +472,11 @@ def _materialize_voices_bulk(
     by_local = {int(message.local_id): message for message in targets if int(message.local_id) > 0}
     matched: set[str] = set()
     rows = session.iter_voice_rows(archive.conversation_id)
-    for row in rows:
+    if progress:
+        progress(0, len(targets), "Extracting voices")
+    for index, row in enumerate(rows):
+        if progress and index % 64 == 0:
+            progress(len(matched), len(targets), "Extracting voices")
         message = None
         if row.server_id > 0:
             message = by_server.get(row.server_id)
