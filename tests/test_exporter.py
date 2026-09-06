@@ -3,28 +3,51 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from wechat_local_archive.exporter import export_chat
+from wechat_local_archive.source import VoiceRow
 
 
 class _FakeSession:
+    account_id = "wxid_me"
+
+    def __init__(self) -> None:
+        self.export_calls = 0
+        self.changed = False
+        self.voice_reads = 0
+        self.messages = [
+            {
+                "chat": "wxid_friend",
+                "local_id": 1,
+                "server_id": 10,
+                "sort_seq": 1,
+                "create_time": 1_725_264_000,
+                "sender_name": "朋友",
+                "type": "文本",
+                "type_code": 1,
+                "content": "你好",
+            }
+        ]
+
     def export_chat_payload(self, username: str) -> dict:
+        self.export_calls += 1
         return {
             "wxid": "wxid_me",
             "nick_name": "我自己",
-            "messages": [
-                {
-                    "chat": username,
-                    "local_id": 1,
-                    "server_id": 10,
-                    "sort_seq": 1,
-                    "create_time": 1_725_264_000,
-                    "sender_name": "朋友",
-                    "type": "文本",
-                    "type_code": 1,
-                    "content": "你好",
-                }
-            ],
+            "messages": [{**message, "chat": username} for message in self.messages],
         }
+
+    def has_new_messages(self, _username: str, _since_seq: int) -> bool:
+        return self.changed
+
+    def chat_message_count(self, _username: str) -> int:
+        return len(self.messages)
+
+    def iter_voice_rows(self, _username: str):
+        self.voice_reads += 1
+        yield VoiceRow(local_id=1, server_id=10, data=b"silk")
+
 
 
 def test_export_chat_writes_json_and_markdown(tmp_path: Path) -> None:
@@ -38,7 +61,221 @@ def test_export_chat_writes_json_and_markdown(tmp_path: Path) -> None:
     markdown = summary.markdown_path.read_text(encoding="utf-8")
     assert payload["conversation"]["id"] == "wxid_friend"
     assert payload["account_name"] == "我自己"
+    assert payload["schema_version"] == 3
     assert payload["messages"][0]["content"] == "你好"
     assert "你好" in markdown
     assert "· 朋友" in markdown
     assert summary.message_count == 1
+
+
+def test_unchanged_second_export_does_not_read_full_history_or_rewrite(tmp_path: Path) -> None:
+    session = _FakeSession()
+    first = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+    archive_before = first.archive_path.read_bytes()
+    markdown_before = first.markdown_path.read_bytes()
+    archive_mtime = first.archive_path.stat().st_mtime_ns
+    markdown_mtime = first.markdown_path.stat().st_mtime_ns
+
+    second = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+
+    assert session.export_calls == 1
+    assert second.message_count == 1
+    assert first.archive_path.read_bytes() == archive_before
+    assert first.markdown_path.read_bytes() == markdown_before
+    assert first.archive_path.stat().st_mtime_ns == archive_mtime
+    assert first.markdown_path.stat().st_mtime_ns == markdown_mtime
+
+
+def test_incremental_export_merges_new_messages_without_duplicates(tmp_path: Path) -> None:
+    session = _FakeSession()
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+    session.messages.append(
+        {
+            "chat": "wxid_friend",
+            "local_id": 2,
+            "server_id": 11,
+            "sort_seq": 2,
+            "create_time": 1_725_264_100,
+            "sender_name": "朋友",
+            "type": "文本",
+            "type_code": 1,
+            "content": "新增",
+        }
+    )
+    session.changed = True
+
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+    session.changed = False
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+
+    payload = json.loads((tmp_path / "archive.json").read_text(encoding="utf-8"))
+    assert [message["id"] for message in payload["messages"]] == ["10", "11"]
+    assert session.export_calls == 2
+
+
+def test_existing_voice_attachment_is_not_rewritten(tmp_path: Path) -> None:
+    session = _FakeSession()
+    session.messages[0].update({"type": "语音", "type_code": 34, "content": "[语音]"})
+    first = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+        media="voice",
+    )
+    payload = json.loads(first.archive_path.read_text(encoding="utf-8"))
+    attachment = tmp_path / payload["messages"][0]["attachment"]
+    first_mtime = attachment.stat().st_mtime_ns
+    assert session.voice_reads == 1
+
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+        media="voice",
+    )
+
+    assert session.voice_reads == 1
+    assert attachment.stat().st_mtime_ns == first_mtime
+
+
+def test_missing_voice_attachment_is_repaired_without_full_history_reload(tmp_path: Path) -> None:
+    session = _FakeSession()
+    session.messages[0].update({"type": "语音", "type_code": 34, "content": "[语音]"})
+    first = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+        media="voice",
+    )
+    payload = json.loads(first.archive_path.read_text(encoding="utf-8"))
+    attachment = tmp_path / payload["messages"][0]["attachment"]
+    attachment.unlink()
+
+    second = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+        media="voice",
+    )
+
+    assert session.export_calls == 1
+    assert session.voice_reads == 2
+    assert attachment.read_bytes() == b"silk"
+    assert second.attachment_count == 1
+
+
+def test_refresh_forces_full_rebuild(tmp_path: Path) -> None:
+    session = _FakeSession()
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+        refresh=True,
+    )
+
+    assert session.export_calls == 2
+
+
+def test_complete_voice_transcript_does_not_initialize_asr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _FakeSession()
+    session.messages[0].update({"type": "语音", "type_code": 34, "content": "[语音]"})
+    first = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+        media="voice",
+    )
+    payload = json.loads(first.archive_path.read_text(encoding="utf-8"))
+    payload["messages"][0]["transcript"] = "已有转写"
+    first.archive_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    class _ForbiddenTranscriber:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("ASR should not be initialized")
+
+    monkeypatch.setattr("wechat_local_archive.exporter.SenseVoiceTranscriber", _ForbiddenTranscriber)
+    summary = export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+        media="voice",
+        transcribe=True,
+    )
+
+    assert summary.transcript_count == 1
+
+
+def test_existing_archive_account_mismatch_fails_closed(tmp_path: Path) -> None:
+    session = _FakeSession()
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+    session.account_id = "wxid_other"
+
+    with pytest.raises(ValueError, match="different WeChat account"):
+        export_chat(
+            session,  # type: ignore[arg-type]
+            conversation_id="wxid_friend",
+            conversation_name="朋友",
+            output_dir=tmp_path,
+        )
+
+
+def test_existing_archive_identity_mismatch_fails_closed(tmp_path: Path) -> None:
+    session = _FakeSession()
+    export_chat(
+        session,  # type: ignore[arg-type]
+        conversation_id="wxid_friend",
+        conversation_name="朋友",
+        output_dir=tmp_path,
+    )
+
+    with pytest.raises(ValueError, match="different conversation"):
+        export_chat(
+            session,  # type: ignore[arg-type]
+            conversation_id="wxid_other",
+            conversation_name="其他",
+            output_dir=tmp_path,
+        )

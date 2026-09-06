@@ -5,6 +5,9 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import Iterable
 
+SUPPORTED_SCHEMA_VERSIONS = {2, 3}
+CURRENT_SCHEMA_VERSION = 3
+
 
 @dataclass(slots=True)
 class ArchiveMessage:
@@ -35,6 +38,8 @@ class Archive:
     conversation_id: str
     conversation_name: str
     messages: list[ArchiveMessage]
+    range_start: str | None = None
+    range_end: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -45,6 +50,10 @@ class Archive:
             "conversation": {
                 "id": self.conversation_id,
                 "name": self.conversation_name,
+            },
+            "range": {
+                "start": self.range_start,
+                "end": self.range_end,
             },
             "messages": [message.to_dict() for message in self.messages],
         }
@@ -93,13 +102,95 @@ def normalize_payload(
         )
     messages.sort(key=lambda item: (item.timestamp_unix, item.sort_seq, item.local_id))
     return Archive(
-        schema_version=2,
+        schema_version=CURRENT_SCHEMA_VERSION,
         exported_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         account=str(payload.get("wxid") or ""),
         account_name=str(payload.get("nick_name") or ""),
         conversation_id=conversation_id,
         conversation_name=conversation_name,
         messages=messages,
+        range_start=start.isoformat() if start else None,
+        range_end=end.isoformat() if end else None,
+    )
+
+
+def archive_from_dict(payload: dict) -> Archive:
+    schema_version = _coerce_int(payload.get("schema_version"))
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"Unsupported archive schema: {schema_version}; supported versions are {sorted(SUPPORTED_SCHEMA_VERSIONS)}"
+        )
+    conversation = payload.get("conversation")
+    if not isinstance(conversation, dict):
+        raise ValueError("Archive conversation metadata is missing")
+    range_payload = payload.get("range") if schema_version >= 3 else None
+    if not isinstance(range_payload, dict):
+        range_payload = {}
+    messages: list[ArchiveMessage] = []
+    raw_messages = payload.get("messages")
+    if not isinstance(raw_messages, list):
+        raise ValueError("Archive messages must be a list")
+    for raw in raw_messages:
+        if not isinstance(raw, dict):
+            raise ValueError("Archive contains an invalid message entry")
+        messages.append(
+            ArchiveMessage(
+                id=str(raw.get("id") or ""),
+                local_id=_coerce_int(raw.get("local_id")),
+                server_id=_coerce_int(raw.get("server_id")),
+                sort_seq=_coerce_int(raw.get("sort_seq")),
+                timestamp=str(raw.get("timestamp") or ""),
+                timestamp_unix=_coerce_int(raw.get("timestamp_unix")),
+                sender=str(raw.get("sender") or ""),
+                type=str(raw.get("type") or ""),
+                type_code=_coerce_int(raw.get("type_code")),
+                content=str(raw.get("content") or ""),
+                media_md5=str(raw.get("media_md5") or "") or None,
+                attachment=str(raw.get("attachment") or "") or None,
+                transcript=str(raw.get("transcript") or "") or None,
+            )
+        )
+    messages.sort(key=lambda item: (item.timestamp_unix, item.sort_seq, item.local_id))
+    return Archive(
+        schema_version=schema_version,
+        exported_at=str(payload.get("exported_at") or ""),
+        account=str(payload.get("account") or ""),
+        account_name=str(payload.get("account_name") or ""),
+        conversation_id=str(conversation.get("id") or ""),
+        conversation_name=str(conversation.get("name") or ""),
+        messages=messages,
+        range_start=str(range_payload.get("start") or "") or None,
+        range_end=str(range_payload.get("end") or "") or None,
+    )
+
+
+def merge_archives(existing: Archive, fresh: Archive) -> Archive:
+    if existing.account != fresh.account:
+        raise ValueError("Existing archive belongs to a different WeChat account")
+    if existing.conversation_id != fresh.conversation_id:
+        raise ValueError("Existing archive belongs to a different conversation")
+    if (existing.range_start, existing.range_end) != (fresh.range_start, fresh.range_end):
+        raise ValueError("Existing archive uses a different date range; use --refresh to rebuild it")
+
+    old_by_id = {message.id: message for message in existing.messages}
+    merged: dict[str, ArchiveMessage] = {message.id: message for message in existing.messages}
+    for message in fresh.messages:
+        old = old_by_id.get(message.id)
+        if old is not None:
+            message.attachment = old.attachment
+            message.transcript = old.transcript
+        merged[message.id] = message
+    messages = sorted(merged.values(), key=lambda item: (item.timestamp_unix, item.sort_seq, item.local_id))
+    return Archive(
+        schema_version=CURRENT_SCHEMA_VERSION,
+        exported_at=fresh.exported_at,
+        account=fresh.account,
+        account_name=fresh.account_name or existing.account_name,
+        conversation_id=fresh.conversation_id,
+        conversation_name=fresh.conversation_name,
+        messages=messages,
+        range_start=fresh.range_start,
+        range_end=fresh.range_end,
     )
 
 

@@ -63,14 +63,22 @@ class _VoiceConnection:
 class _FakeDB:
     def __init__(self, account_dir: Path, shards: dict[str, _VoiceConnection] | None = None) -> None:
         self.account_dir = str(account_dir)
+        self.wxid = "wxid_me"
         self._connections = shards or {}
         self._db_files = [
             (name, str(account_dir / "db_storage" / "message" / name), 0)
             for name in self._connections
         ]
+        self._new_messages: list[dict] = []
 
     def _open(self, rel: str):
         return self._connections[rel]
+
+    def list_message_chats(self) -> list[dict]:
+        return [{"username": "wxid_friend", "message_count": 12}]
+
+    def get_new_messages(self, _user: str, since_seq: int = 0, limit: int = 200) -> list[dict]:
+        return [item for item in self._new_messages if item["sort_seq"] > since_seq][:limit]
 
 
 def test_source_adapter_searches_all_media_shards(tmp_path: Path) -> None:
@@ -130,6 +138,21 @@ def test_source_adapter_finds_requested_files_only(tmp_path: Path) -> None:
     found = adapter.find_file_sources({"report.docx"})
 
     assert found == {"report.docx": [wanted]}
+
+
+def test_source_adapter_exposes_lightweight_incremental_probe(tmp_path: Path) -> None:
+    db = _FakeDB(tmp_path)
+    db._new_messages = [{"sort_seq": 101}]
+    adapter = WeChatSourceAdapter(
+        db,  # type: ignore[arg-type]
+        cfg_dword=None,
+        installed_version="1.2.0.3",
+    )
+
+    assert adapter.account_id == "wxid_me"
+    assert adapter.chat_message_count("wxid_friend") == 12
+    assert adapter.has_new_messages("wxid_friend", 100) is True
+    assert adapter.has_new_messages("wxid_friend", 101) is False
 
 
 def test_source_adapter_accepts_supported_three_part_version(tmp_path: Path) -> None:

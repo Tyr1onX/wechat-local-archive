@@ -49,8 +49,24 @@ class WeChatSourceAdapter:
     def account_dir(self) -> Path:
         return Path(self._db.account_dir)
 
+    @property
+    def account_id(self) -> str:
+        return str(getattr(self._db, "wxid", "") or "")
+
     def list_chats(self) -> list[dict]:
         return self._db.list_message_chats()
+
+    def chat_message_count(self, conversation_id: str) -> int | None:
+        for chat in self.list_chats():
+            if str(chat.get("username") or "") == conversation_id:
+                try:
+                    return int(chat.get("message_count"))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def has_new_messages(self, conversation_id: str, since_seq: int) -> bool:
+        return bool(self._db.get_new_messages(conversation_id, since_seq=since_seq, limit=1))
 
     def export_messages(self, username: str, workdir: Path) -> dict:
         target = workdir / "history.json"
@@ -197,8 +213,18 @@ class SourceSession:
     adapter: WeChatSourceAdapter
     workdir: Path
 
+    @property
+    def account_id(self) -> str:
+        return self.adapter.account_id
+
     def list_chats(self) -> list[dict]:
         return self.adapter.list_chats()
+
+    def chat_message_count(self, conversation_id: str) -> int | None:
+        return self.adapter.chat_message_count(conversation_id)
+
+    def has_new_messages(self, conversation_id: str, since_seq: int) -> bool:
+        return self.adapter.has_new_messages(conversation_id, since_seq)
 
     def export_chat_payload(self, username: str) -> dict:
         return self.adapter.export_messages(username, self.workdir)

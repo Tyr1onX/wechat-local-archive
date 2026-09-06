@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--media", choices=("none", "voice", "all"), default="none")
     export.add_argument("--transcribe", action="store_true", help="Batch-transcribe extracted voice with SenseVoiceSmall")
     export.add_argument("--batch-size", type=int, default=16)
+    export.add_argument("--refresh", action="store_true", help="Rebuild the selected archive instead of incrementally updating it")
 
     sub.add_parser("reset", help="Remove saved config and DPAPI-protected master key")
     return parser
@@ -133,6 +134,7 @@ def _export(args) -> int:
             media=args.media,
             transcribe=args.transcribe,
             batch_size=args.batch_size,
+            refresh=args.refresh,
             progress=progress,
         )
     print(f"archive: {summary.archive_path}")

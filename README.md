@@ -110,6 +110,14 @@ wechat-archive export <username> --out D:\Archives\chat --media all
 wechat-archive export <username> --out D:\Archives\chat --media all --transcribe
 ```
 
+同一输出目录再次执行时默认是**增量、幂等更新**：已有消息不会重复追加，存在的附件不会重新复制/解密，已有语音转写不会重新推理；如果旧消息的附件后来才落到本机，也会只补齐缺失项。需要明确全量重建时使用：
+
+```powershell
+wechat-archive export <username> --out D:\Archives\chat --media all --transcribe --refresh
+```
+
+`archive.json` 的账号、会话或日期范围与本次请求不匹配时会拒绝合并，避免把两个档案混在一起。
+
 第一次转写会下载约 242 MB 的 SenseVoiceSmall INT8 ONNX 模型；之后可离线运行。
 
 ## 输出

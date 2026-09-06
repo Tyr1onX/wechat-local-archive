@@ -11,7 +11,15 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-from .archive import Archive, normalize_payload, relative_attachment, selected_media_type
+from .archive import (
+    CURRENT_SCHEMA_VERSION,
+    Archive,
+    archive_from_dict,
+    merge_archives,
+    normalize_payload,
+    relative_attachment,
+    selected_media_type,
+)
 from .source import SourceSession
 from .transcribe import SenseVoiceTranscriber
 
@@ -36,6 +44,7 @@ def export_chat(
     media: str = "none",
     transcribe: bool = False,
     batch_size: int = 16,
+    refresh: bool = False,
     progress=None,
 ) -> ExportSummary:
     if media not in {"none", "voice", "all"}:
@@ -45,50 +54,149 @@ def export_chat(
 
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    payload = session.export_chat_payload(conversation_id)
-    archive = normalize_payload(
-        payload,
-        conversation_id=conversation_id,
-        conversation_name=conversation_name,
-        start=start,
-        end=end,
-    )
+    archive_path = output_dir / "archive.json"
+    markdown_path = output_dir / "chat.md"
+    existing = _load_existing_archive(archive_path)
+    if existing is not None:
+        _validate_existing_archive(
+            existing,
+            session=session,
+            conversation_id=conversation_id,
+            start=start,
+            end=end,
+            allow_range_change=refresh,
+        )
+
+    source_changed = existing is None or refresh
+    if existing is not None and not refresh:
+        source_changed = _source_has_changes(session, existing, end=end)
+
+    if source_changed:
+        payload = session.export_chat_payload(conversation_id)
+        fresh = normalize_payload(
+            payload,
+            conversation_id=conversation_id,
+            conversation_name=conversation_name,
+            start=start,
+            end=end,
+        )
+        archive = fresh if existing is None or refresh else merge_archives(existing, fresh)
+    else:
+        archive = existing
+        if archive is None:  # pragma: no cover - defensive narrowing
+            raise RuntimeError("Incremental archive state is unavailable")
 
     warnings: list[str] = []
-    attachment_count = 0
+    modified = source_changed
     if media != "none":
-        attachment_count, media_warnings = _materialize_media(
+        new_attachments, media_warnings = _materialize_media(
             session,
             archive,
             output_dir,
             media=media,
             progress=progress,
         )
+        modified = modified or new_attachments > 0
         warnings.extend(media_warnings)
 
-    transcript_count = 0
-    if transcribe:
+    before_transcripts = sum(1 for message in archive.messages if message.transcript)
+    if transcribe and _has_pending_transcription(archive, output_dir):
         transcriber = SenseVoiceTranscriber(batch_size=batch_size)
         _new_transcripts, voice_warnings = transcriber.transcribe_messages(
             archive.messages,
             archive_root=output_dir,
             progress=progress,
         )
-        transcript_count = sum(1 for message in archive.messages if message.transcript)
         warnings.extend(voice_warnings)
+    transcript_count = sum(1 for message in archive.messages if message.transcript)
+    modified = modified or transcript_count != before_transcripts
 
-    archive_path = output_dir / "archive.json"
-    markdown_path = output_dir / "chat.md"
-    _write_json(archive_path, archive)
-    _write_markdown(markdown_path, archive)
+    if modified:
+        archive.schema_version = CURRENT_SCHEMA_VERSION
+        archive.exported_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        _write_json(archive_path, archive)
+        _write_markdown(markdown_path, archive)
+    elif not markdown_path.is_file():
+        _write_markdown(markdown_path, archive)
+
     return ExportSummary(
         archive_path=archive_path,
         markdown_path=markdown_path,
         message_count=len(archive.messages),
-        attachment_count=attachment_count,
+        attachment_count=_count_available_attachments(archive, output_dir),
         transcript_count=transcript_count,
         warnings=tuple(warnings),
     )
+
+
+def _load_existing_archive(path: Path) -> Archive | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Existing archive is unreadable: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Existing archive root must be an object")
+    return archive_from_dict(payload)
+
+
+def _validate_existing_archive(
+    archive: Archive,
+    *,
+    session: SourceSession,
+    conversation_id: str,
+    start: date | None,
+    end: date | None,
+    allow_range_change: bool,
+) -> None:
+    if archive.account and session.account_id and archive.account != session.account_id:
+        raise ValueError("Existing archive belongs to a different WeChat account")
+    if archive.conversation_id != conversation_id:
+        raise ValueError("Existing archive belongs to a different conversation")
+    requested_range = (start.isoformat() if start else None, end.isoformat() if end else None)
+    existing_range = (archive.range_start, archive.range_end)
+    if not allow_range_change and existing_range != requested_range:
+        raise ValueError("Existing archive uses a different date range; use --refresh to rebuild it")
+
+
+def _source_has_changes(session: SourceSession, archive: Archive, end: date | None) -> bool:
+    if not archive.messages:
+        return True
+    latest_seq = max(message.sort_seq for message in archive.messages)
+    should_probe_tail = end is None or end >= date.today()
+    if should_probe_tail and session.has_new_messages(archive.conversation_id, latest_seq):
+        return True
+    if archive.range_start is None and archive.range_end is None:
+        current_count = session.chat_message_count(archive.conversation_id)
+        if current_count is not None and current_count > len(archive.messages):
+            return True
+    return False
+
+
+def _attachment_path(message, output_dir: Path) -> Path | None:
+    if not message.attachment:
+        return None
+    path = Path(message.attachment)
+    return path if path.is_absolute() else output_dir / path
+
+
+def _attachment_exists(message, output_dir: Path) -> bool:
+    path = _attachment_path(message, output_dir)
+    return bool(path and path.is_file())
+
+
+def _has_pending_transcription(archive: Archive, output_dir: Path) -> bool:
+    return any(
+        selected_media_type(message.type_code) == 34
+        and not message.transcript
+        and _attachment_exists(message, output_dir)
+        for message in archive.messages
+    )
+
+
+def _count_available_attachments(archive: Archive, output_dir: Path) -> int:
+    return sum(1 for message in archive.messages if _attachment_exists(message, output_dir))
 
 
 def _materialize_media(
@@ -107,6 +215,7 @@ def _materialize_media(
             if selected_media_type(message.type_code) in {3, 34, 43}
             or (selected_media_type(message.type_code) == 49 and _appmsg_type(message.content) == 6)
         ]
+    targets = [message for message in targets if not _attachment_exists(message, output_dir)]
     if not targets:
         return 0, []
 
