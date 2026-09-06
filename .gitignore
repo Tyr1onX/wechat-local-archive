@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+*.egg-info/
+dist/
+build/
+work/
+outputs/
+*.log
+
+# Never commit local WeChat data, decrypted DBs, keys or generated archives.
+xwechat_files/
+**/db_storage/
+**/keys.json
+**/secrets.dpapi
+**/archive.json
+**/chat.md
+**/assets/
