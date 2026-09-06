@@ -133,19 +133,39 @@ class SenseVoiceTranscriber:
                 batch = chunks[batch_index * self.batch_size : (batch_index + 1) * self.batch_size]
                 if progress:
                     progress(batch_index, total_batches, f"Transcribing batch {batch_index + 1}/{total_batches}")
+                raw: list[object | None]
                 try:
-                    raw = model(
+                    values = model(
                         [str(item.path) for item in batch],
                         language="zh",
                         textnorm="withitn",
                     )
-                except Exception as exc:
-                    raise TranscriptionError(f"SenseVoice batch inference failed: {exc}") from exc
-                if len(raw) != len(batch):
-                    raise TranscriptionError(
-                        f"SenseVoice returned {len(raw)} results for a batch of {len(batch)} audio chunks"
-                    )
+                    if len(values) != len(batch):
+                        raise RuntimeError(
+                            f"SenseVoice returned {len(values)} results for {len(batch)} audio chunks"
+                        )
+                    raw = list(values)
+                except Exception as batch_exc:
+                    raw = []
+                    for item in batch:
+                        try:
+                            values = model(
+                                [str(item.path)],
+                                language="zh",
+                                textnorm="withitn",
+                            )
+                            if len(values) != 1:
+                                raise RuntimeError(f"SenseVoice returned {len(values)} results for one audio chunk")
+                            raw.append(values[0])
+                        except Exception as exc:
+                            raw.append(None)
+                            warnings.append(
+                                f"voice inference failed for message {messages[item.message_index].id}: {exc} "
+                                f"(batch fallback after: {batch_exc})"
+                            )
                 for item, value in zip(batch, raw):
+                    if value is None:
+                        continue
                     try:
                         text = postprocess(value).strip()
                     except Exception:
@@ -269,11 +289,12 @@ def split_wav(source: Path, output_dir: Path, max_seconds: float = 28.0) -> list
                 out.setframerate(rate)
                 out.writeframes(wav.readframes(total_frames))
             return [target]
+        part_count = (total_frames + frames_per_part - 1) // frames_per_part
+        base_frames = total_frames // part_count
+        extra_frames = total_frames % part_count
         paths: list[Path] = []
-        part = 0
-        remaining = total_frames
-        while remaining > 0:
-            count = min(frames_per_part, remaining)
+        for part in range(part_count):
+            count = base_frames + (1 if part < extra_frames else 0)
             data = wav.readframes(count)
             target = output_dir / f"{part:03d}.wav"
             with wave.open(str(target), "wb") as out:
@@ -282,8 +303,6 @@ def split_wav(source: Path, output_dir: Path, max_seconds: float = 28.0) -> list
                 out.setframerate(rate)
                 out.writeframes(data)
             paths.append(target)
-            remaining -= count
-            part += 1
         return paths
 
 

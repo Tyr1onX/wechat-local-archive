@@ -56,6 +56,41 @@ def test_normalize_payload_filters_dates_and_sorts() -> None:
     assert archive.messages[1].content == "第二条"
 
 
+def test_normalize_payload_prefers_timestamp_over_cross_shard_sort_seq() -> None:
+    payload = {
+        "wxid": "wxid_me",
+        "nick_name": "我自己",
+        "messages": [
+            {
+                "chat": "wxid_friend",
+                "local_id": 2,
+                "server_id": 102,
+                "sort_seq": 1_725_264_001_000,
+                "create_time": 1_725_264_000,
+                "sender_name": "朋友",
+                "type": "文本",
+                "type_code": 1,
+                "content": "后发",
+            },
+            {
+                "chat": "wxid_friend",
+                "local_id": 1,
+                "server_id": 101,
+                "sort_seq": 1_725_264_000_000,
+                "create_time": 1_725_264_001,
+                "sender_name": "我自己",
+                "type": "文本",
+                "type_code": 1,
+                "content": "更晚",
+            },
+        ],
+    }
+    archive = normalize_payload(payload, "wxid_friend", "朋友")
+    assert [message.local_id for message in archive.messages] == [2, 1]
+    assert archive.account_name == "我自己"
+    assert archive.schema_version == 2
+
+
 def test_parse_date_and_wrapped_media_type() -> None:
     assert parse_date("2026-09-06") == date(2026, 9, 6)
     assert selected_media_type((57 << 32) | 49) == 49

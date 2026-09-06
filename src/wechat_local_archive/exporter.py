@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import html
 import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from .archive import Archive, normalize_payload, relative_attachment, selected_media_type
@@ -63,11 +71,12 @@ def export_chat(
     transcript_count = 0
     if transcribe:
         transcriber = SenseVoiceTranscriber(batch_size=batch_size)
-        transcript_count, voice_warnings = transcriber.transcribe_messages(
+        _new_transcripts, voice_warnings = transcriber.transcribe_messages(
             archive.messages,
             archive_root=output_dir,
             progress=progress,
         )
+        transcript_count = sum(1 for message in archive.messages if message.transcript)
         warnings.extend(voice_warnings)
 
     archive_path = output_dir / "archive.json"
@@ -91,22 +100,74 @@ def _materialize_media(
     media: str,
     progress=None,
 ) -> tuple[int, list[str]]:
-    supported = {34} if media == "voice" else {3, 34, 43, 49}
-    targets = [message for message in archive.messages if selected_media_type(message.type_code) in supported]
+    if media == "voice":
+        targets = [message for message in archive.messages if selected_media_type(message.type_code) == 34]
+    else:
+        targets = [
+            message
+            for message in archive.messages
+            if selected_media_type(message.type_code) in {3, 34, 43}
+            or (selected_media_type(message.type_code) == 49 and _appmsg_type(message.content) == 6)
+        ]
     if not targets:
         return 0, []
 
     assets_dir = output_dir / "assets"
-    downloader = session.media_downloader(assets_dir)
     warnings: list[str] = []
     count = 0
-    for index, message in enumerate(targets, start=1):
+
+    voice_targets = [message for message in targets if selected_media_type(message.type_code) == 34]
+    if voice_targets:
+        voice_count, voice_warnings = _materialize_voices_bulk(
+            session,
+            archive,
+            output_dir,
+            voice_targets,
+            progress=progress,
+        )
+        count += voice_count
+        warnings.extend(voice_warnings)
+
+    image_targets = [message for message in targets if selected_media_type(message.type_code) == 3]
+    if image_targets:
+        image_count, image_warnings = _materialize_images_bulk(
+            session,
+            archive,
+            output_dir,
+            image_targets,
+            progress=progress,
+        )
+        count += image_count
+        warnings.extend(image_warnings)
+
+    file_targets = [message for message in targets if selected_media_type(message.type_code) == 49]
+    if file_targets:
+        file_count, file_warnings = _materialize_files_bulk(
+            session,
+            archive,
+            output_dir,
+            file_targets,
+            progress=progress,
+        )
+        count += file_count
+        warnings.extend(file_warnings)
+
+    other_targets = [
+        message
+        for message in targets
+        if selected_media_type(message.type_code) not in {3, 34, 49}
+    ]
+    if not other_targets:
+        return count, warnings
+
+    downloader = session.media_downloader(assets_dir)
+    for index, message in enumerate(other_targets, start=1):
         base_type = selected_media_type(message.type_code)
-        category = {3: "image", 34: "voice", 43: "video", 49: "file"}.get(base_type, "other")
+        category = {3: "image", 43: "video", 49: "file"}.get(base_type, "other")
         destination = assets_dir / category
         destination.mkdir(parents=True, exist_ok=True)
         if progress:
-            progress(index - 1, len(targets), f"Extracting media {index}/{len(targets)}")
+            progress(index - 1, len(other_targets), f"Extracting {category} {index}/{len(other_targets)}")
         try:
             if base_type == 3:
                 if session.cfg_dword is None:
@@ -115,12 +176,6 @@ def _materialize_media(
                     )
                     continue
                 resolved = downloader.download_image(
-                    archive.conversation_id,
-                    message.local_id,
-                    save_dir=str(destination),
-                )
-            elif base_type == 34:
-                resolved = downloader.download_voice(
                     archive.conversation_id,
                     message.local_id,
                     save_dir=str(destination),
@@ -150,8 +205,230 @@ def _materialize_media(
         message.attachment = relative_attachment(resolved_path, output_dir)
         count += 1
     if progress:
-        progress(len(targets), len(targets), f"Extracted {count} attachments")
+        progress(len(other_targets), len(other_targets), f"Extracted {count} attachments")
     return count, warnings
+
+
+def _materialize_images_bulk(
+    session: SourceSession,
+    archive: Archive,
+    output_dir: Path,
+    targets: list,
+    progress=None,
+) -> tuple[int, list[str]]:
+    destination = output_dir / "assets" / "image"
+    destination.mkdir(parents=True, exist_ok=True)
+    expected = {message.media_md5.lower(): message for message in targets if message.media_md5}
+    if not expected:
+        return 0, [f"image metadata is missing for message {message.id}" for message in targets]
+
+    chat_hash = hashlib.md5(archive.conversation_id.encode("utf-8")).hexdigest()
+    attach_root = Path(session.db.account_dir) / "msg" / "attach" / chat_hash
+    found: dict[str, dict[str, Path]] = {key: {} for key in expected}
+    if attach_root.is_dir():
+        for root, _dirs, files in os.walk(attach_root):
+            for name in files:
+                lowered = name.casefold()
+                suffix = None
+                digest = None
+                if lowered.endswith("_h.dat"):
+                    digest, suffix = lowered[:-6], "high"
+                elif lowered.endswith("_t.dat"):
+                    digest, suffix = lowered[:-6], "thumb"
+                elif lowered.endswith(".dat"):
+                    digest, suffix = lowered[:-4], "normal"
+                if digest in expected and suffix:
+                    found[digest][suffix] = Path(root) / name
+
+    downloader = session.media_downloader(destination)
+    warnings: list[str] = []
+    count = 0
+    for index, message in enumerate(targets, start=1):
+        if progress:
+            progress(index - 1, len(targets), f"Extracting image {index}/{len(targets)}")
+        digest = (message.media_md5 or "").lower()
+        choices = found.get(digest, {})
+        source = choices.get("high") or choices.get("normal") or choices.get("thumb")
+        if source is None:
+            warnings.append(f"image is not available locally for message {message.id}")
+            continue
+        try:
+            data = downloader.decrypt_image(str(source))
+            suffix = "_thumb" if source == choices.get("thumb") else ""
+            if data[:3] == b"\xff\xd8\xff":
+                ext = "jpg"
+            elif data[:4] == b"\x89PNG":
+                ext = "png"
+            elif data[:3] == b"GIF":
+                ext = "gif"
+            elif data[:4] == b"wxgf":
+                jpg = _convert_wxgf_to_jpg(data) or downloader._wxgf_to_jpg(data)
+                if jpg is not None:
+                    data, ext = jpg, "jpg"
+                else:
+                    ext = "wxgf"
+            else:
+                ext = "img"
+            target = destination / f"{archive.conversation_id}_{message.local_id}{suffix}.{ext}"
+            target.write_bytes(data)
+            message.attachment = relative_attachment(target, output_dir)
+            count += 1
+        except Exception as exc:
+            warnings.append(f"image extraction failed for message {message.id}: {exc}")
+    if progress:
+        progress(len(targets), len(targets), f"Extracted {count}/{len(targets)} images")
+    return count, warnings
+
+
+def _materialize_files_bulk(
+    session: SourceSession,
+    archive: Archive,
+    output_dir: Path,
+    targets: list,
+    progress=None,
+) -> tuple[int, list[str]]:
+    destination = output_dir / "assets" / "file"
+    destination.mkdir(parents=True, exist_ok=True)
+    base = Path(session.db.account_dir) / "msg" / "file"
+    by_name: dict[str, list[Path]] = {}
+    if base.is_dir():
+        for root, _dirs, files in os.walk(base):
+            for name in files:
+                by_name.setdefault(name.casefold(), []).append(Path(root) / name)
+
+    warnings: list[str] = []
+    count = 0
+    for index, message in enumerate(targets, start=1):
+        if progress:
+            progress(index - 1, len(targets), f"Extracting file {index}/{len(targets)}")
+        title = _extract_xml_text(message.content, ("title",))
+        name = title.replace("\\", "/").split("/")[-1].strip()
+        candidates = by_name.get(name.casefold(), []) if name else []
+        if not candidates:
+            warnings.append(f"file is not available locally for message {message.id}")
+            continue
+        month = datetime.fromtimestamp(message.timestamp_unix).strftime("%Y-%m")
+        source = next((path for path in candidates if month in path.parts), None)
+        if source is None:
+            source = max(candidates, key=lambda path: path.stat().st_mtime)
+        safe_name = Path(name).name or "attachment.bin"
+        target = destination / f"{archive.conversation_id}_{message.local_id}_{safe_name}"
+        try:
+            shutil.copyfile(source, target)
+        except OSError as exc:
+            warnings.append(f"file extraction failed for message {message.id}: {exc}")
+            continue
+        message.attachment = relative_attachment(target, output_dir)
+        count += 1
+    if progress:
+        progress(len(targets), len(targets), f"Extracted {count}/{len(targets)} files")
+    return count, warnings
+
+
+def _convert_wxgf_to_jpg(data: bytes) -> bytes | None:
+    starts = [
+        offset
+        for offset in (data.find(b"\x00\x00\x01"), data.find(b"\x00\x00\x00\x01"))
+        if offset >= 0
+    ]
+    if not starts:
+        return None
+    try:
+        import imageio_ffmpeg
+
+        executable = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+    with tempfile.TemporaryDirectory(prefix="wechat-local-wxgf-") as temp_name:
+        source = Path(temp_name) / "image.hevc"
+        target = Path(temp_name) / "image.jpg"
+        source.write_bytes(data[min(starts) :])
+        try:
+            result = subprocess.run(
+                [
+                    executable,
+                    "-y",
+                    "-v",
+                    "error",
+                    "-f",
+                    "hevc",
+                    "-i",
+                    str(source),
+                    "-frames:v",
+                    "1",
+                    str(target),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0 or not target.is_file():
+            return None
+        output = target.read_bytes()
+        return output if output[:3] == b"\xff\xd8\xff" else None
+
+
+def _materialize_voices_bulk(
+    session: SourceSession,
+    archive: Archive,
+    output_dir: Path,
+    targets: list,
+    progress=None,
+) -> tuple[int, list[str]]:
+    destination = output_dir / "assets" / "voice"
+    destination.mkdir(parents=True, exist_ok=True)
+    by_server = {int(message.server_id): message for message in targets if int(message.server_id) > 0}
+    by_local = {int(message.local_id): message for message in targets if int(message.local_id) > 0}
+    matched: set[str] = set()
+    media_dbs = [
+        (rel, path)
+        for rel, path, _size in session.db._db_files
+        if os.path.basename(path).startswith("media_")
+    ]
+    for db_index, (rel, _path) in enumerate(media_dbs, start=1):
+        if progress:
+            progress(db_index - 1, len(media_dbs), f"Reading voice shard {db_index}/{len(media_dbs)}")
+        conn = session.db._open(rel)
+        try:
+            cid = conn.execute(
+                "SELECT rowid FROM Name2Id WHERE user_name=? LIMIT 1",
+                (archive.conversation_id,),
+            ).fetchone()
+            if not cid:
+                continue
+            rows = conn.execute(
+                "SELECT local_id, svr_id, voice_data FROM VoiceInfo "
+                "WHERE chat_name_id=? AND voice_data IS NOT NULL",
+                (cid[0],),
+            )
+            for row in rows:
+                message = None
+                svr_id = int(row["svr_id"] or 0)
+                local_id = int(row["local_id"] or 0)
+                if svr_id > 0:
+                    message = by_server.get(svr_id)
+                if message is None and local_id > 0:
+                    message = by_local.get(local_id)
+                if message is None or message.id in matched:
+                    continue
+                data = row["voice_data"]
+                if not data:
+                    continue
+                target = destination / f"{archive.conversation_id}_{message.local_id}.silk"
+                target.write_bytes(data)
+                message.attachment = relative_attachment(target, output_dir)
+                matched.add(message.id)
+        finally:
+            conn.close()
+    warnings = [
+        f"voice is not available locally for message {message.id}"
+        for message in targets
+        if message.id not in matched
+    ]
+    if progress:
+        progress(len(media_dbs), len(media_dbs), f"Extracted {len(matched)}/{len(targets)} voices")
+    return len(matched), warnings
 
 
 def _write_json(path: Path, archive: Archive) -> None:
@@ -173,14 +450,9 @@ def _write_markdown(path: Path, archive: Archive) -> None:
         "",
     ]
     for message in archive.messages:
-        lines.append(f"## {message.timestamp} · {message.sender or '未知'}")
+        lines.append(f"## {message.timestamp} · {_display_sender(archive, message)}")
         lines.append("")
-        if message.transcript:
-            lines.append(message.transcript)
-        elif message.content:
-            lines.append(message.content)
-        else:
-            lines.append(f"[{message.type}]")
+        lines.append(_render_message_content(message))
         if message.attachment:
             if selected_media_type(message.type_code) == 3:
                 lines.extend(["", f"![图片]({message.attachment})"])
@@ -190,3 +462,72 @@ def _write_markdown(path: Path, archive: Archive) -> None:
                 lines.extend(["", f"[附件]({message.attachment})"])
         lines.append("")
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _display_sender(archive: Archive, message) -> str:
+    if message.type_code == 10000:
+        return "系统"
+    if archive.account_name and message.sender == archive.account_name:
+        return "我"
+    if message.sender and not archive.conversation_id.endswith("@chatroom"):
+        return archive.conversation_name
+    return message.sender or "未知"
+
+
+def _render_message_content(message) -> str:
+    if message.transcript:
+        return message.transcript
+
+    base_type = selected_media_type(message.type_code)
+    if message.type_code == 10000:
+        return _extract_xml_text(message.content, ("content",)) or "[系统消息]"
+    if base_type == 1:
+        return message.content or "[文本]"
+    if base_type == 3:
+        return "[图片]"
+    if base_type == 34:
+        return "[语音]"
+    if base_type == 43:
+        return "[视频]"
+    if base_type == 47:
+        return "[表情]"
+    if base_type == 48:
+        label = _extract_xml_text(message.content, ("label", "poiname"))
+        return f"[位置] {label}" if label else "[位置]"
+    if base_type == 49:
+        title = _extract_xml_text(message.content, ("title", "des"))
+        app_type = _appmsg_type(message.content)
+        label = {5: "链接", 6: "文件", 19: "聊天记录", 33: "小程序", 57: "引用消息"}.get(app_type, "应用消息")
+        return f"[{label}] {title}" if title else f"[{label}]"
+    if message.content and not message.content.lstrip().startswith("<"):
+        return message.content
+    return f"[{message.type}]"
+
+
+def _appmsg_type(content: str) -> int | None:
+    value = _extract_xml_text(content, ("type",))
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_xml_text(content: str, tags: tuple[str, ...]) -> str:
+    if not content:
+        return ""
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        root = None
+    if root is not None:
+        for tag in tags:
+            node = root.find(f".//{tag}")
+            if node is not None and node.text and node.text.strip():
+                return html.unescape(node.text.strip())
+    for tag in tags:
+        match = re.search(rf"<{tag}[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{tag}>", content, re.I | re.S)
+        if match:
+            text = re.sub(r"<[^>]+>", "", match.group(1)).strip()
+            if text:
+                return html.unescape(text)
+    return ""

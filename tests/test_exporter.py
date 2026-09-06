@@ -10,6 +10,7 @@ class _FakeSession:
     def export_chat_payload(self, username: str) -> dict:
         return {
             "wxid": "wxid_me",
+            "nick_name": "我自己",
             "messages": [
                 {
                     "chat": username,
@@ -36,6 +37,8 @@ def test_export_chat_writes_json_and_markdown(tmp_path: Path) -> None:
     payload = json.loads(summary.archive_path.read_text(encoding="utf-8"))
     markdown = summary.markdown_path.read_text(encoding="utf-8")
     assert payload["conversation"]["id"] == "wxid_friend"
+    assert payload["account_name"] == "我自己"
     assert payload["messages"][0]["content"] == "你好"
     assert "你好" in markdown
+    assert "· 朋友" in markdown
     assert summary.message_count == 1

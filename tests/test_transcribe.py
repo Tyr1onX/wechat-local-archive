@@ -15,7 +15,7 @@ def _write_silence(path: Path, seconds: float, rate: int = 24_000) -> None:
         wav.writeframes(b"\x00\x00" * frames)
 
 
-def test_split_wav_splits_long_voice_into_short_chunks(tmp_path: Path) -> None:
+def test_split_wav_balances_long_voice_without_tiny_tail(tmp_path: Path) -> None:
     source = tmp_path / "source.wav"
     _write_silence(source, 61)
     parts = split_wav(source, tmp_path / "parts", max_seconds=28)
@@ -24,6 +24,17 @@ def test_split_wav_splits_long_voice_into_short_chunks(tmp_path: Path) -> None:
     for part in parts:
         with wave.open(str(part), "rb") as wav:
             durations.append(wav.getnframes() / wav.getframerate())
-    assert durations[0] == 28
-    assert durations[1] == 28
-    assert 4.9 < durations[2] < 5.1
+    assert all(20.2 < duration < 20.5 for duration in durations)
+    assert max(durations) <= 28
+
+
+def test_split_wav_does_not_create_near_empty_remainder(tmp_path: Path) -> None:
+    source = tmp_path / "source.wav"
+    _write_silence(source, 28.02)
+    parts = split_wav(source, tmp_path / "parts", max_seconds=28)
+    assert len(parts) == 2
+    durations = []
+    for part in parts:
+        with wave.open(str(part), "rb") as wav:
+            durations.append(wav.getnframes() / wav.getframerate())
+    assert all(14.0 <= duration <= 14.02 for duration in durations)

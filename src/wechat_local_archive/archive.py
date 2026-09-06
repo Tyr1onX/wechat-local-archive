@@ -18,6 +18,7 @@ class ArchiveMessage:
     type: str
     type_code: int
     content: str
+    media_md5: str | None = None
     attachment: str | None = None
     transcript: str | None = None
 
@@ -30,6 +31,7 @@ class Archive:
     schema_version: int
     exported_at: str
     account: str
+    account_name: str
     conversation_id: str
     conversation_name: str
     messages: list[ArchiveMessage]
@@ -39,6 +41,7 @@ class Archive:
             "schema_version": self.schema_version,
             "exported_at": self.exported_at,
             "account": self.account,
+            "account_name": self.account_name,
             "conversation": {
                 "id": self.conversation_id,
                 "name": self.conversation_name,
@@ -85,13 +88,15 @@ def normalize_payload(
                 type=str(raw.get("type") or _base_type(type_code)),
                 type_code=type_code,
                 content=content,
+                media_md5=str(raw.get("md5") or "") or None,
             )
         )
-    messages.sort(key=lambda item: (item.sort_seq, item.local_id, item.timestamp_unix))
+    messages.sort(key=lambda item: (item.timestamp_unix, item.sort_seq, item.local_id))
     return Archive(
-        schema_version=1,
+        schema_version=2,
         exported_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         account=str(payload.get("wxid") or ""),
+        account_name=str(payload.get("nick_name") or ""),
         conversation_id=conversation_id,
         conversation_name=conversation_name,
         messages=messages,
