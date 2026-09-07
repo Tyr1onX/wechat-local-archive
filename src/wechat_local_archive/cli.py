@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+
+from .version import __version__
 from pathlib import Path
 
 from .ai_export import rebuild_ai_jsonl
@@ -20,11 +22,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="wechat-archive",
         description="Read-only local WeChat 4.x archive exporter.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("gui", help="Open the minimal desktop archive window")
+    gui = sub.add_parser("gui", help="Open the minimal desktop archive window")
+    gui.add_argument("--smoke", action="store_true", help=argparse.SUPPRESS)
 
     doctor = sub.add_parser("doctor", help="Check local data discovery and offline bootstrap state")
     doctor.add_argument("--db-dir", default=None)
+    doctor.add_argument("--runtime", action="store_true", help="Check bundled audio and native ASR dependencies")
 
     boot = sub.add_parser("bootstrap", help="Capture the database master key once from an already logged-in WeChat")
     boot.add_argument("--db-dir", default=None)
@@ -80,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "gui":
             from .gui import main as gui_main
-            return gui_main()
+            return gui_main(smoke=args.smoke)
         if args.command == "doctor":
             return _doctor(args)
         if args.command == "bootstrap":
@@ -142,7 +147,34 @@ def _doctor(args) -> int:
         print(f"offline mode: {'ready' if account_dir.is_dir() else 'data directory missing'}")
     else:
         print("offline mode: bootstrap required")
+    if args.runtime:
+        _runtime_diagnostics()
     return 0
+
+
+def _runtime_diagnostics() -> None:
+    from importlib import resources
+    import importlib.metadata as metadata
+    try:
+        import onnxruntime
+        import pysilk
+        import kaldi_native_fbank
+        import imageio_ffmpeg
+        from funasr_onnx import SenseVoiceSmall
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(f"ASR runtime dependency is unavailable: {exc}") from exc
+
+    if not onnxruntime.get_available_providers():
+        raise RuntimeError("ONNX Runtime has no available execution providers")
+    executable = Path(imageio_ffmpeg.get_ffmpeg_exe())
+    if not executable.is_file():
+        raise RuntimeError("Bundled FFmpeg is missing")
+    if not resources.files("wechat_local_archive").joinpath("reader.html").is_file():
+        raise RuntimeError("Offline reader template is missing")
+    print(f"ASR runtime: {metadata.version('funasr-onnx')} / onnxruntime {metadata.version('onnxruntime')}")
+    print(f"ASR providers: {', '.join(onnxruntime.get_available_providers())}")
+    print(f"FFmpeg: {executable.name}")
+    print("runtime: PASS")
 
 
 def _bootstrap(args) -> int:

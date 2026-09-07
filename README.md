@@ -47,7 +47,13 @@ DPAPI secret → validated DB keys → local SQLCipher decrypt → local DB expo
 
 所以正常日常使用不需要微信保持打开；只有微信重新登录后密钥发生变化、或首次从未初始化过时，才需要重新 `bootstrap`。
 
-## 安装
+## Windows 便携版
+
+普通用户优先从 [GitHub Releases](https://github.com/Tyr1onX/wechat-local-archive/releases) 下载 Windows x64 ZIP。解压后双击 `WeChatLocalArchive.exe`，无需安装 Python、uv 或管理员权限；命令行入口是 `WeChatLocalArchiveCLI.exe`。基础包包含本地 SenseVoice 运行时，但不包含模型权重或可选 Whisper 复核依赖。首次模型下载后可离线转写。
+
+便携版与 Python 版使用相同的 `%LOCALAPPDATA%\WeChatLocalArchive` 设置、DPAPI 密钥和默认归档目录。删除程序文件夹不会删除用户数据；不要把密钥或聊天归档复制到发布包中。发布包提供 `build-info.json`、`SHA256SUMS.txt` 和第三方许可文本，ZIP 旁提供 SHA256 校验文件。当前没有独立代码签名，不应通过关闭 Windows 安全保护来解决下载警告。
+
+## Python 安装（开发与高级功能）
 
 要求：Windows 10/11、64 位 Python 3.12、Windows 微信 4.x。正式/可复现安装使用仓库中的 `requirements-win.lock`；它包含当前已验证的完整 Windows 依赖图和语音转写依赖。
 
@@ -67,11 +73,12 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[voice,dev]"
 ```
 
-修改依赖声明后，用固定的 uv 版本重新生成 lock；复核依赖必须受基础 lock 约束，避免升级已验证的微信适配器：
+修改依赖声明后，用固定的 uv 版本重新生成 lock；复核与打包依赖必须受基础 lock 约束，避免升级已验证的微信适配器：
 
 ```powershell
 uv pip compile pyproject.toml --extra voice --extra dev --python-version 3.12 --python-platform windows --output-file requirements-win.lock
 uv pip compile pyproject.toml --extra voice --extra verify --extra dev --python-version 3.12 --python-platform windows --constraint requirements-win.lock --output-file requirements-win-verify.lock
+uv pip compile pyproject.toml --extra voice --extra dev --extra build --python-version 3.12 --python-platform windows --constraint requirements-win.lock --output-file requirements-win-build.lock
 ```
 
 ## 图形界面
@@ -247,6 +254,19 @@ wechat-archive html D:\Archives\chat --no-audio
 转换失败会保留转写和原始语音链接。生成的 HTML 不加载 CDN、远程字体或脚本；CSP 禁止网络连接，聊天内容按纯文本渲染。可删除 `chat.html` 和 `assets/reader-audio/` 后从 `archive.json` 重建。`verify` 会检查已有 HTML 是否与当前档案一致，孤儿文件清理不会删除阅读器音频缓存。
 
 注意：HTML 是本地阅读器，不是独立的完整备份。移动它时应连同 `assets/` 一起移动；若需保存完整记录，保留整个归档目录。发送给 AI 做文本分析仍优先使用 `ai.jsonl`。
+
+## 构建与发布
+
+Windows x64 构建使用固定的 `requirements-win-build.lock` 和 PyInstaller onedir。GUI、CLI 共用一套运行时，不使用 onefile 或常驻服务器。构建前先安装锁定依赖及本项目，再执行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/build_portable.py
+.\.venv\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.0.zip
+```
+
+`smoke_portable.py` 会将 ZIP 解压到隔离临时目录，清除 Python 虚拟环境路径并使用临时用户配置，检查版本、隐藏 GUI 初始化、原生 ASR 依赖及合成档案的 verify/AI/HTML/语音播放。它不读取真实微信数据。真实微信 bootstrap 与离线导出仍需在有授权测试账号的环境单独验证。
+
+`.github/workflows/portable.yml` 在 Windows CI 中从锁定依赖构建、测试并上传 ZIP artifact。仅 `v<版本>` tag 触发 Release，发布前检查 tag/commit/版本/锁哈希及包内文件校验。`scripts/verify_release.py` 可独立执行同样的来源校验。发布说明见 `docs/release-v0.2.0.md`。
 
 ## 隐私与风险边界
 

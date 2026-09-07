@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, font, ttk
 
 from .archive import parse_date
+from .version import __version__
 from .service import ArchiveService
 from .state import UiConfig, load_ui_config, save_ui_config
 from .worker import ArchiveWorker, WorkerEvent
@@ -179,6 +180,7 @@ class ArchiveWindow:
         self.summary_label.grid(row=3, column=0, sticky="w")
         self.open_button = ttk.Button(footer, text="[ OPEN FOLDER ]", command=self.open_folder, style="Archive.TButton")
         self.open_button.grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(footer, text=f"v{__version__}", style="Archive.TLabel").grid(row=4, column=1, sticky="e", pady=(8, 0))
         outer.bind("<Configure>", self._resize_labels)
         self._update_controls()
 
@@ -429,9 +431,15 @@ class ArchiveWindow:
         self.root.destroy()
 
 
-def main() -> int:
+def main(*, smoke: bool = False) -> int:
     root = tk.Tk()
-    ArchiveWindow(root)
+    if smoke:
+        root.withdraw()
+    window = ArchiveWindow(root, autoload=not smoke)
+    if smoke:
+        root.update()
+        window.close()
+        return 0
     root.mainloop()
     return 0
 
