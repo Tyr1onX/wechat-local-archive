@@ -9,6 +9,7 @@ from .archive import parse_date
 from .version import __version__
 from .service import ArchiveService
 from .state import UiConfig, load_ui_config, save_ui_config
+from .ui_text import PRESET_LABELS, PRESET_VALUES, error_text, progress_text
 from .worker import ArchiveWorker, WorkerEvent
 
 
@@ -31,6 +32,10 @@ class ArchiveWindow:
         default_root = Path.home() / "Downloads" / "wechat-local-archive"
         self.output = tk.StringVar(value=settings.output_root if settings else str(default_root))
         self.preset = tk.StringVar(value=settings.asr_preset if settings else "balanced")
+        self.preset_label = tk.StringVar(value=PRESET_LABELS[self.preset.get()])
+        self.preset.trace_add("write", lambda *_: self.preset_label.set(PRESET_LABELS[self.preset.get()]))
+        self.options_visible = False
+        self.options_text = tk.StringVar(value="更多选项 ▾")
         self.search = tk.StringVar()
         self.account_choice = tk.StringVar()
         self.start_date = tk.StringVar()
@@ -45,6 +50,7 @@ class ArchiveWindow:
         self.progress_text = tk.StringVar(value="")
         self.summary_text = tk.StringVar(value="")
         self._build()
+        self._show_ready(False)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self._poll_id = self.root.after(80, self._poll)
         if autoload:
@@ -54,15 +60,17 @@ class ArchiveWindow:
 
     def _build(self) -> None:
         root = self.root
-        root.title("WeChat Local Archive")
+        root.title("微信本地归档")
         screen_width, screen_height = root.winfo_screenwidth(), root.winfo_screenheight()
-        root.geometry(f"{min(820, max(480, screen_width - 80))}x{min(700, max(460, screen_height - 80))}")
+        root.geometry(f"{min(780, max(480, screen_width - 80))}x{min(620, max(460, screen_height - 80))}")
         root.minsize(480, 460)
         style = ttk.Style(root)
         if "vista" in style.theme_names():
             style.theme_use("vista")
-        fixed = font.nametofont("TkFixedFont", root=root).copy()
-        fixed.configure(family="Consolas", size=10)
+        fixed = font.nametofont("TkDefaultFont", root=root).copy()
+        families = set(font.families(root))
+        family = next((name for name in ("Microsoft YaHei UI", "Microsoft YaHei", "SimSun") if name in families), fixed.cget("family"))
+        fixed.configure(family=family, size=10)
         self.fixed = fixed
         style.configure("Archive.TLabel", font=fixed)
         style.configure("Archive.TButton", font=fixed)
@@ -74,28 +82,37 @@ class ArchiveWindow:
         style.configure("Archive.Horizontal.TProgressbar", thickness=5)
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
-        outer = ttk.Frame(root, padding=16)
+        outer = ttk.Frame(root, padding=12)
         outer.grid(sticky="nsew")
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(3, weight=1)
-        title = ttk.Label(outer, text="WECHAT LOCAL ARCHIVE", font=("Consolas", 13, "bold"))
+        title_font = fixed.copy()
+        title_font.configure(size=13, weight="bold")
+        self.title_font = title_font
+        title = ttk.Label(outer, text="微信本地归档", font=title_font)
         title.grid(row=0, column=0, sticky="w", pady=(0, 10))
         info = ttk.Frame(outer)
         info.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         info.columnconfigure(1, weight=1)
-        self._label(info, "STATUS", 0)
-        self._label(info, "ACCOUNT", 1)
+        self._label(info, "状态", 0)
+        self._label(info, "账号", 1)
         self.status_label = ttk.Label(info, textvariable=self.status_text, style="Archive.TLabel", wraplength=610)
         self.status_label.grid(row=0, column=1, sticky="w")
-        ttk.Label(info, textvariable=self.account_text, style="Archive.TLabel").grid(row=1, column=1, sticky="w")
+        self.account_label = ttk.Label(info, textvariable=self.account_text, style="Archive.TLabel", wraplength=610)
+        self.account_label.grid(row=1, column=1, sticky="w")
 
         self.setup_frame = ttk.Frame(outer)
         self.setup_frame.grid(row=2, column=0, sticky="ew", pady=(4, 12))
-        ttk.Label(self.setup_frame, text="首次使用请先登录 Windows 微信，再读取本地数据库密钥。", wraplength=650).pack(anchor="w", pady=(0, 8))
+        self.setup_hint = ttk.Label(self.setup_frame, text="首次使用：先登录 Windows 微信，再点击初始化。仅在本机读取数据库密钥，不会发送消息。", style="Archive.TLabel", wraplength=650)
+        self.setup_hint.pack(anchor="w", pady=(0, 8))
         self.account_box = ttk.Combobox(self.setup_frame, textvariable=self.account_choice, state="readonly", style="Archive.TCombobox")
         self.account_box.pack(fill="x", pady=(0, 8))
-        self.initialize_button = ttk.Button(self.setup_frame, text="[ INITIALIZE ]", command=self.initialize, style="Archive.TButton")
-        self.initialize_button.pack(anchor="w")
+        setup_actions = ttk.Frame(self.setup_frame)
+        setup_actions.pack(anchor="w")
+        self.initialize_button = ttk.Button(setup_actions, text="初始化", command=self.initialize, style="Archive.TButton")
+        self.initialize_button.pack(side="left", padx=(0, 8))
+        self.refresh_button = ttk.Button(setup_actions, text="重新检查", command=lambda: self._start("load", self._load), style="Archive.TButton")
+        self.refresh_button.pack(side="left")
 
         self.ready_host = ttk.Frame(outer)
         self.ready_host.grid(row=3, column=0, sticky="nsew")
@@ -111,62 +128,70 @@ class ArchiveWindow:
         self.ready_frame.bind("<Configure>", lambda _: self.form_canvas.configure(scrollregion=self.form_canvas.bbox("all")))
         self.form_canvas.bind("<Configure>", lambda event: self.form_canvas.itemconfigure(self._form_window, width=event.width))
         root.bind("<MouseWheel>", self._on_mousewheel, add="+")
-        self.ready_frame.columnconfigure(1, weight=1)
-        self._label(self.ready_frame, "CHAT", 0)
+        self.ready_frame.columnconfigure(0, weight=1)
+        ttk.Label(self.ready_frame, text="1. 选择要保存的聊天", style="Archive.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 5))
         self.search_entry = ttk.Entry(self.ready_frame, textvariable=self.search, style="Archive.TEntry")
-        self.search_entry.grid(row=0, column=1, sticky="ew", pady=(0, 5))
+        self.search_entry.grid(row=1, column=0, sticky="ew", pady=(0, 5))
         self.search.trace_add("write", lambda *_: self._filter_chats())
         self.chat_tree = ttk.Treeview(self.ready_frame, columns=("name", "count"), show="headings", selectmode="browse", height=5, style="Archive.Treeview")
         self.chat_tree.heading("name", text="会话")
-        self.chat_tree.heading("count", text="消息")
+        self.chat_tree.heading("count", text="消息数")
         self.chat_tree.column("name", minwidth=120, width=300, stretch=True)
         self.chat_tree.column("count", minwidth=65, width=90, stretch=False, anchor="e")
-        self.chat_tree.grid(row=1, column=1, sticky="nsew", pady=(0, 8))
+        self.chat_tree.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
         self.chat_tree.bind("<<TreeviewSelect>>", lambda _: self._selection_changed())
-        self.chat_tree.bind("<Double-1>", lambda _: self.start_export())
-        self._label(self.ready_frame, "RANGE", 2)
-        dates = ttk.Frame(self.ready_frame)
-        dates.grid(row=2, column=1, sticky="ew", pady=(0, 7))
-        self.start_entry = ttk.Entry(dates, textvariable=self.start_date, width=14, style="Archive.TEntry")
-        self.start_entry.pack(side="left")
-        ttk.Label(dates, text="  —  ").pack(side="left")
-        self.end_entry = ttk.Entry(dates, textvariable=self.end_date, width=14, style="Archive.TEntry")
-        self.end_entry.pack(side="left")
-        ttk.Label(dates, text="  留空=不限").pack(side="left")
-        self._label(self.ready_frame, "MEDIA", 3)
-        media_row = ttk.Frame(self.ready_frame)
-        media_row.grid(row=3, column=1, sticky="w", pady=(0, 7))
+        ttk.Label(self.ready_frame, text="2. 选择保存位置", style="Archive.TLabel").grid(row=3, column=0, sticky="w", pady=(0, 5))
+        output_row = ttk.Frame(self.ready_frame)
+        output_row.grid(row=4, column=0, sticky="ew", pady=(0, 5))
+        output_row.columnconfigure(0, weight=1)
+        self.output_entry = ttk.Entry(output_row, textvariable=self.output, style="Archive.TEntry")
+        self.output_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.browse_button = ttk.Button(output_row, text="选择文件夹", command=self.browse, style="Archive.TButton")
+        self.browse_button.grid(row=0, column=1)
+        self.output_entry.bind("<FocusOut>", lambda _: self._save_settings())
+        self.save_hint = ttk.Label(self.ready_frame, text="默认保存在下载文件夹；重复导出会更新已有档案。", style="Archive.TLabel", wraplength=650)
+        self.save_hint.grid(row=5, column=0, sticky="w", pady=(0, 10))
+        actions = ttk.Frame(self.ready_frame)
+        actions.grid(row=6, column=0, sticky="w", pady=(0, 8))
+        self.export_button = ttk.Button(actions, text="开始归档", command=self.start_export, style="Archive.TButton")
+        self.export_button.pack(side="left", padx=(0, 10))
+        self.verify_button = ttk.Button(actions, text="检查所选归档", command=self.start_verify, style="Archive.TButton")
+        self.verify_button.pack(side="left", padx=(0, 10))
+        self.cancel_button = ttk.Button(actions, text="取消", command=self.cancel, style="Archive.TButton")
+        self.cancel_button.pack(side="left")
+        self.options_button = ttk.Button(self.ready_frame, textvariable=self.options_text, command=self._toggle_options, style="Archive.TButton")
+        self.options_button.grid(row=7, column=0, sticky="w", pady=(0, 8))
+        self.options_frame = ttk.Frame(self.ready_frame)
+        self.options_frame.grid(row=8, column=0, sticky="ew")
+        self.options_frame.columnconfigure(1, weight=1)
+        self.options_frame.grid_remove()
+        self._label(self.options_frame, "日期范围", 0)
+        dates = ttk.Frame(self.options_frame)
+        dates.grid(row=0, column=1, sticky="ew", pady=(0, 7))
+        ttk.Label(dates, text="开始", style="Archive.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=(0, 4))
+        self.start_entry = ttk.Entry(dates, textvariable=self.start_date, width=12, style="Archive.TEntry")
+        self.start_entry.grid(row=0, column=1, sticky="w", pady=(0, 4))
+        ttk.Label(dates, text="结束", style="Archive.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6))
+        self.end_entry = ttk.Entry(dates, textvariable=self.end_date, width=12, style="Archive.TEntry")
+        self.end_entry.grid(row=1, column=1, sticky="w")
+        ttk.Label(dates, text="留空表示不限，格式：年-月-日", style="Archive.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._label(self.options_frame, "保存内容", 1)
+        media_row = ttk.Frame(self.options_frame)
+        media_row.grid(row=1, column=1, sticky="w", pady=(0, 7))
         self.image_check = ttk.Checkbutton(media_row, text="图片", variable=self.images, style="Archive.TCheckbutton")
         self.voice_check = ttk.Checkbutton(media_row, text="语音", variable=self.voice, command=self._voice_changed, style="Archive.TCheckbutton")
         self.other_check = ttk.Checkbutton(media_row, text="视频 / 文件", variable=self.other_media, style="Archive.TCheckbutton")
         for widget in (self.image_check, self.voice_check, self.other_check):
             widget.pack(side="left", padx=(0, 12))
-        self._label(self.ready_frame, "ASR", 4)
-        asr_row = ttk.Frame(self.ready_frame)
-        asr_row.grid(row=4, column=1, sticky="w", pady=(0, 7))
+        self._label(self.options_frame, "语音转写", 2)
+        asr_row = ttk.Frame(self.options_frame)
+        asr_row.grid(row=2, column=1, sticky="w", pady=(0, 7))
         self.asr_check = ttk.Checkbutton(asr_row, text="转写语音", variable=self.transcribe, style="Archive.TCheckbutton")
         self.asr_check.pack(side="left", padx=(0, 12))
-        self.preset_box = ttk.Combobox(asr_row, textvariable=self.preset, values=("background", "balanced", "fast"), state="readonly", width=13, style="Archive.TCombobox")
+        self.preset_box = ttk.Combobox(asr_row, textvariable=self.preset_label, values=tuple(PRESET_VALUES), state="readonly", width=16, style="Archive.TCombobox")
         self.preset_box.pack(side="left")
-        self.preset_box.bind("<<ComboboxSelected>>", lambda _: self._save_settings())
-        self._label(self.ready_frame, "OUTPUT", 5)
-        output_row = ttk.Frame(self.ready_frame)
-        output_row.grid(row=5, column=1, sticky="ew", pady=(0, 10))
-        output_row.columnconfigure(0, weight=1)
-        self.output_entry = ttk.Entry(output_row, textvariable=self.output, style="Archive.TEntry")
-        self.output_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.browse_button = ttk.Button(output_row, text="...", width=3, command=self.browse, style="Archive.TButton")
-        self.browse_button.grid(row=0, column=1)
-        self.output_entry.bind("<FocusOut>", lambda _: self._save_settings())
-        actions = ttk.Frame(self.ready_frame)
-        actions.grid(row=6, column=1, sticky="w", pady=(0, 10))
-        self.export_button = ttk.Button(actions, text="[ EXPORT ]", command=self.start_export, style="Archive.TButton")
-        self.export_button.pack(side="left", padx=(0, 10))
-        self.verify_button = ttk.Button(actions, text="VERIFY", command=self.start_verify, style="Archive.TButton")
-        self.verify_button.pack(side="left", padx=(0, 10))
-        self.cancel_button = ttk.Button(actions, text="CANCEL", command=self.cancel, style="Archive.TButton")
-        self.cancel_button.pack(side="left")
-        self.controls = (self.search_entry, self.start_entry, self.end_entry, self.image_check, self.voice_check, self.other_check, self.asr_check, self.preset_box, self.output_entry, self.browse_button, self.export_button, self.verify_button)
+        self.preset_box.bind("<<ComboboxSelected>>", lambda _: self._preset_changed())
+        self.controls = (self.search_entry, self.start_entry, self.end_entry, self.image_check, self.voice_check, self.other_check, self.asr_check, self.preset_box, self.output_entry, self.browse_button, self.export_button, self.verify_button, self.options_button)
 
         footer = ttk.Frame(outer)
         footer.grid(row=4, column=0, sticky="ew", pady=(8, 0))
@@ -178,7 +203,7 @@ class ArchiveWindow:
         self.progress_bar.grid(row=2, column=0, sticky="ew", pady=(5, 7))
         self.summary_label = ttk.Label(footer, textvariable=self.summary_text, wraplength=650, justify="left")
         self.summary_label.grid(row=3, column=0, sticky="w")
-        self.open_button = ttk.Button(footer, text="[ OPEN FOLDER ]", command=self.open_folder, style="Archive.TButton")
+        self.open_button = ttk.Button(footer, text="打开归档文件夹", command=self.open_folder, style="Archive.TButton")
         self.open_button.grid(row=4, column=0, sticky="w", pady=(8, 0))
         ttk.Label(footer, text=f"v{__version__}", style="Archive.TLabel").grid(row=4, column=1, sticky="e", pady=(8, 0))
         outer.bind("<Configure>", self._resize_labels)
@@ -194,11 +219,27 @@ class ArchiveWindow:
 
     def _resize_labels(self, event) -> None:
         width = max(180, event.width - 120)
-        for label in (self.status_label, self.progress_label, self.summary_label):
+        for label in (self.status_label, self.account_label, self.progress_label, self.summary_label):
             label.configure(wraplength=width)
+        for label in (self.setup_hint, self.save_hint):
+            label.configure(wraplength=max(180, event.width - 30))
 
     def _label(self, parent: ttk.Frame, text: str, row: int) -> None:
         ttk.Label(parent, text=text, style="Archive.TLabel", width=9).grid(row=row, column=0, sticky="nw", padx=(0, 12), pady=(2, 5))
+
+    def _toggle_options(self) -> None:
+        if not self._ready or self._busy or self._closing:
+            return
+        self.options_visible = not self.options_visible
+        self.options_text.set("收起选项 ▴" if self.options_visible else "更多选项 ▾")
+        if self.options_visible:
+            self.options_frame.grid()
+        else:
+            self.options_frame.grid_remove()
+
+    def _preset_changed(self) -> None:
+        self.preset.set(PRESET_VALUES[self.preset_label.get()])
+        self._save_settings()
 
     def _show_ready(self, ready: bool) -> None:
         self._ready = ready
@@ -217,6 +258,7 @@ class ArchiveWindow:
         self.preset_box.configure(state="readonly" if enabled else "disabled")
         self.chat_tree.configure(selectmode="browse" if enabled else "none")
         self.initialize_button.configure(state="normal" if not self._busy and not self._closing else "disabled")
+        self.refresh_button.configure(state="normal" if not self._busy and not self._closing else "disabled")
         self.account_box.configure(state="readonly" if not self._busy and not self._closing else "disabled")
         self.cancel_button.configure(state="normal" if self._busy and not self._closing else "disabled")
         self.export_button.configure(state="normal" if enabled and bool(self.chat_tree.selection()) else "disabled")
@@ -256,13 +298,13 @@ class ArchiveWindow:
         self.progress_bar["value"] = 0
         self.progress_text.set("正在处理…")
         self.summary_text.set("")
-        self.status_text.set({"load": "正在读取本地状态…", "initialize": "正在初始化…", "export": "正在导出…", "verify": "正在检查归档…"}.get(kind, "正在处理…"))
+        self.status_text.set({"load": "正在检查本地状态…", "initialize": "正在初始化…", "export": "正在归档…", "verify": "正在检查归档…"}.get(kind, "正在处理…"))
         self._update_controls()
         try:
             self.worker.start(operation)
         except RuntimeError as exc:
             self._busy = False
-            self.status_text.set(str(exc))
+            self.status_text.set(error_text(exc))
             self._update_controls()
 
     def _poll(self) -> None:
@@ -278,7 +320,8 @@ class ArchiveWindow:
         if event.kind == "progress":
             current, total, label = event.value
             percent = min(100, current * 100 / total) if total else 0
-            self.progress_text.set(f"{percent:.0f}%  {label}" if total else label)
+            message = progress_text(label)
+            self.progress_text.set(f"{percent:.0f}%  {message}" if total else message)
             self.progress_bar["value"] = percent
             return
         self.worker.join()
@@ -286,7 +329,7 @@ class ArchiveWindow:
         if event.kind == "done":
             if self._task in {"load", "initialize"}:
                 status, chats, accounts = event.value
-                self.account_text.set(status.account)
+                self.account_text.set(status.account or "未选择")
                 self._accounts = [str(item["account"]) for item in accounts]
                 self.account_box.configure(values=self._accounts)
                 if len(self._accounts) == 1:
@@ -297,22 +340,26 @@ class ArchiveWindow:
                 if status.ready:
                     self._chats = {str(c["username"]): c for c in chats}
                     self._filter_chats()
-                    self.status_text.set("READY · 本地数据库可用")
+                    self.status_text.set("已准备好 · 请选择要保存的聊天" if chats else "已准备好 · 未找到可导出的会话")
+                    self.progress_text.set("")
                 else:
-                    self.status_text.set("需要初始化 · 请先登录 Windows 微信")
+                    self.status_text.set("尚未初始化 · 请先登录 Windows 微信")
+                    self.progress_text.set("")
             elif self._task == "export":
                 result = event.value
                 self._last_directory = result.archive_path.parent
                 self.summary_text.set(f"{result.message_count} 条消息 · {result.attachment_count} 个附件 · {result.transcript_count} 条转写" + (f" · {len(result.warnings)} 条警告" if result.warnings else ""))
-                self.status_text.set("DONE · 归档已保存")
+                self.status_text.set("归档完成 · 已保存到本机")
+                self.progress_text.set(f"保存位置：{self._last_directory}")
                 if result.warnings:
-                    self.progress_text.set(result.warnings[0])
+                    self.progress_text.set(f"{len(result.warnings)} 条提醒：{error_text(result.warnings[0])}")
             elif self._task == "verify":
                 result = event.value
                 self.summary_text.set(f"{result.message_count} 条消息 · {result.attachment_count} 个附件 · 语音转写 {result.voice_transcript_count}/{result.voice_count}" + (f" · {result.orphan_count} 个未引用文件" if result.orphan_count else ""))
-                self.status_text.set("PASS · 完整性检查通过" if result.ok else "FAIL · 完整性检查未通过")
+                self.status_text.set("检查通过 · 归档完整" if result.ok else "检查未通过 · 请查看下方原因")
+                self.progress_text.set("检查完成，没有发现损坏或缺失文件。" if result.ok else "检查完成，请查看下方原因。")
                 if result.errors:
-                    self.progress_text.set(result.errors[0])
+                    self.progress_text.set(error_text(result.errors[0]))
                 self._last_directory = result.root
             if self._task in {"export", "verify"}:
                 self.progress_bar["value"] = 100
@@ -320,7 +367,7 @@ class ArchiveWindow:
             self.status_text.set("已取消 · 原有归档保留，可再次导出")
             self.progress_text.set("")
         else:
-            self.status_text.set(f"失败：{event.value}")
+            self.status_text.set(error_text(event.value))
             self.progress_text.set("")
         self._update_controls()
 
@@ -360,7 +407,7 @@ class ArchiveWindow:
         self._start("initialize", operation)
 
     def browse(self) -> None:
-        chosen = filedialog.askdirectory(parent=self.root, initialdir=self.output.get() or str(Path.home()), mustexist=True)
+        chosen = filedialog.askdirectory(parent=self.root, title="选择归档保存文件夹", initialdir=self.output.get() or str(Path.home()), mustexist=True)
         if chosen:
             self.output.set(chosen)
             self._save_settings()
@@ -387,7 +434,7 @@ class ArchiveWindow:
             preset = self.preset.get()
             self._save_settings()
         except (OSError, ValueError) as exc:
-            self.status_text.set(str(exc))
+            self.status_text.set(error_text(exc))
             return
         self._start("export", lambda check, progress: self.service.export(chat_selector=str(chat["username"]), output_dir=target, start=start, end=end, media_types=media_types, transcribe=transcribe, asr_preset=preset, progress=progress, cancel=check))
 
@@ -397,7 +444,7 @@ class ArchiveWindow:
         try:
             target = self._target()
         except (OSError, ValueError) as exc:
-            self.status_text.set(str(exc))
+            self.status_text.set(error_text(exc))
             return
         def operation(check, progress):
             check()

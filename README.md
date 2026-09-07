@@ -85,7 +85,7 @@ uv pip compile pyproject.toml --extra voice --extra dev --extra build --python-v
 
 安装后运行 `wechat-archive-gui`，或使用 `wechat-archive gui`。界面使用 Windows 自带的 tkinter/ttk，不需要 Electron、WebView 或额外 GUI 运行时。若 Python 提示缺少 tkinter，请安装包含 Tcl/Tk 的完整 Python 3.12。
 
-一个窗口即可完成：首次选择本地账号并初始化、搜索会话、填写可选日期范围、选择图片/语音/视频文件、选择语音转写资源档位、导出、验证和打开文件夹。默认输出到“下载\wechat-local-archive”，可自行修改。已有匹配的旧归档会复用；新归档使用稳定的会话 ID 目录，避免同名联系人混淆。
+中文界面按“首次初始化 → 选择聊天 → 选择保存位置 → 开始归档 → 打开结果”组织。日期范围、媒体选择和语音转写资源档位放在“更多选项”，默认保存已有媒体并转写语音；资源档位显示为“后台（低占用）/均衡（推荐）/快速（高占用）”，内部仍使用原有英文参数。默认输出到“下载\wechat-local-archive”，可自行修改。已有匹配的旧归档会复用；新归档使用稳定的会话 ID 目录，避免同名联系人混淆。中文化只改变界面文案，不翻译或迁移真实磁盘路径。
 
 导出默认增量更新。`CANCEL` 会等待当前不可中断的数据库或模型操作结束，然后安全停止；已经完成的语音转写会保留在本地缓存，下次继续使用。关闭正在工作的窗口也会先请求取消，不会直接丢弃后台写入。窗口仅记住输出根目录和 ASR 档位。首次下载模型需要网络，之后可离线转写。
 
@@ -261,12 +261,12 @@ Windows x64 构建使用固定的 `requirements-win-build.lock` 和 PyInstaller 
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/build_portable.py
-.\.venv\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.3.zip
+.\.venv\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.4.zip
 ```
 
 `smoke_portable.py` 会将 ZIP 解压到隔离临时目录，清除 Python 虚拟环境路径并使用临时用户配置，检查版本、隐藏 GUI 初始化、原生 ASR 依赖及合成档案的 verify/AI/HTML/语音播放。它不读取真实微信数据。真实微信 bootstrap 与离线导出仍需在有授权测试账号的环境单独验证。
 
-`.github/workflows/portable.yml` 在 Windows CI 中从锁定依赖构建、测试并上传 ZIP artifact。仅 `v<版本>` tag 触发 Release，发布前检查 tag/commit/版本/锁哈希及包内文件校验。`scripts/verify_release.py` 可独立执行同样的来源校验。发布说明见 `docs/release-v0.2.3.md`。
+`.github/workflows/portable.yml` 在 Windows CI 中从锁定依赖构建、测试并上传 ZIP artifact。仅 `v<版本>` tag 触发 Release，发布前检查 tag/commit/版本/锁哈希及包内文件校验。`scripts/verify_release.py` 可独立执行同样的来源校验。发布说明见 `docs/release-v0.2.4.md`。
 
 ## 隐私与风险边界
 

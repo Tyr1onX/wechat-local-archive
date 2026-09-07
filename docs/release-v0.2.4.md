@@ -1,24 +1,27 @@
-## WeChat Local Archive v0.2.3
+## WeChat Local Archive v0.2.4
 
-Windows 便携版隐私清理版本。已从公开 Git 历史中去除已知的个人会话标识，撤下旧发布包并重新构建；不改变归档核心功能。解压即可运行，不需要预装 Python、uv 或开发工具，也不需要管理员权限。
+中文界面与首次使用体验更新。核心归档格式、数据库读取方式和命令行参数保持不变。解压即可运行，不需要预装 Python、uv 或开发工具，也不需要管理员权限。
 
 ### 使用
 
-下载 `wechat-local-archive-windows-x64-v0.2.3.zip`，解压后双击 `WeChatLocalArchive.exe`。命令行入口为 `WeChatLocalArchiveCLI.exe`，可使用 `--help`、`--version`。支持 Windows 10/11 x64。
+下载 `wechat-local-archive-windows-x64-v0.2.4.zip`，解压后双击 `WeChatLocalArchive.exe`。命令行入口为 `WeChatLocalArchiveCLI.exe`，可使用 `--help`、`--version`。支持 Windows 10/11 x64。
 
 首次使用需要已登录的 Windows 微信 4.x 完成本地初始化。之后可使用缓存密钥离线归档。默认输出到“下载\wechat-local-archive”，设置与 DPAPI 加密密钥保存在 `%LOCALAPPDATA%\WeChatLocalArchive`；删除程序文件夹不会删除这些数据。
 
 ### 本版内容
 
 - 增量、幂等归档与完整性验证；保留已有附件和转写缓存。
-- 极简单窗口 GUI，支持会话搜索、日期范围、媒体选择和安全取消。
+- 单窗口中文主流程：首次初始化、选择聊天、选择保存位置、开始归档、打开结果。
+- 日期范围、媒体选择和语音转写资源档位收进“更多选项”，默认仍保存媒体并转写语音。
+- 资源档位显示为“后台（低占用）/均衡（推荐）/快速（高占用）”，保存和调用时仍使用原有英文参数。
+- 初始化、进度、错误和完成状态采用中文提示；保留安全取消及原有归档复用逻辑。
 - `archive.json` 真源、`chat.md`、精简 `ai.jsonl` 和离线 `chat.html` 阅读器。
 - SenseVoice 本地批量转写与资源档位；浏览器语音播放使用本地 MP3 缓存。
 - 可选 Whisper 复核代码及来源记录；基础便携包不包含 Whisper，需使用 Python 可选依赖安装方式启用。
 
 ### 隐私清理说明
 
-旧版本的公开发布附件已撤下，当前发布包从清理后的源码重新构建。旧 Git commit ID 已失效；本地已有归档和 DPAPI 密钥不需要迁移或重置。历史重写不能撤回已经下载的副本，也不能保证第三方缓存立即消失。
+旧版本的公开发布附件已撤下，当前发布包从清理后的源码重新构建。旧 Git 提交已不在当前分支和标签中，但旧 SHA 及第三方缓存仍可能保留历史内容。本地已有归档和 DPAPI 密钥不需要迁移或重置。中文化不会重命名、移动或清空已有数据目录。
 
 ### 隐私与限制
 

@@ -46,7 +46,7 @@ class FakeService:
             while True:
                 check()
                 time.sleep(0.01)
-        progress(1, 2, "Exporting 1/2")
+        progress(1, 2, "Transcribing batch 1/2")
         check()
         directory = kwargs["output_dir"]
         directory.mkdir(parents=True, exist_ok=True)
@@ -107,6 +107,13 @@ def test_single_window_load_export_verify_and_validation(window, tmp_path):
     root, app, service = window
     assert app._ready
     assert app.account_text.get() == "wxid_test"
+    assert app.root.title() == "微信本地归档"
+    assert app.export_button.cget("text") == "开始归档"
+    assert app.verify_button.cget("text") == "检查所选归档"
+    assert app.open_button.cget("text") == "打开归档文件夹"
+    assert not app.options_visible
+    assert not app.options_frame.winfo_ismapped()
+    assert app.chat_tree.bind("<Double-1>") == ""
     app.search.set("朋友")
     root.update()
     assert app.chat_tree.selection() == ("wxid_friend",)
@@ -114,6 +121,7 @@ def test_single_window_load_export_verify_and_validation(window, tmp_path):
     app.start_export()
     assert not app._busy
     assert not service.exports
+    assert "日期格式" in app.status_text.get()
     app.start_date.set("2026-01-01")
     app.end_date.set("2026-01-02")
     app.preset.set("background")
@@ -123,10 +131,48 @@ def test_single_window_load_export_verify_and_validation(window, tmp_path):
     assert service.exports[0]["media_types"] == frozenset({3, 34, 43, 49})
     assert service.exports[0]["start"].isoformat() == "2026-01-01"
     assert app._last_directory == tmp_path / "wxid_friend"
-    assert "DONE" in app.status_text.get()
+    assert "归档完成" in app.status_text.get()
+    assert "保存位置" in app.progress_text.get()
     app.start_verify()
     _wait(root, lambda: not app._busy)
-    assert "PASS" in app.status_text.get()
+    assert "检查通过" in app.status_text.get()
+
+
+def test_more_options_preserve_internal_preset_and_saved_path(window, tmp_path, monkeypatch):
+    import wechat_local_archive.gui as gui
+
+    root, app, service = window
+    saved = []
+    monkeypatch.setattr(gui, "save_ui_config", saved.append)
+    assert app.output.get() == str(tmp_path)
+    assert app.preset.get() == "balanced"
+    assert app.preset_label.get() == "均衡（推荐）"
+    assert app.images.get() and app.voice.get() and app.other_media.get() and app.transcribe.get()
+    app._toggle_options()
+    root.update()
+    assert app.options_visible
+    assert app.preset_box.cget("values") == ("后台（低占用）", "均衡（推荐）", "快速（高占用）")
+    app.preset_label.set("后台（低占用）")
+    app._preset_changed()
+    assert app.preset.get() == "background"
+    assert saved[-1].asr_preset == "background"
+    assert saved[-1].output_root == str(tmp_path)
+    app.preset_label.set("快速（高占用）")
+    app._preset_changed()
+    assert app.preset.get() == "fast"
+    app.preset.set("balanced")
+    assert app.preset_label.get() == "均衡（推荐）"
+    app._toggle_options()
+    root.update()
+    assert not app.options_frame.winfo_ismapped()
+    assert app.preset.get() == "balanced"
+    app.search.set("朋友")
+    root.update()
+    app.start_export()
+    _wait(root, lambda: not app._busy)
+    assert service.exports[-1]["asr_preset"] == "balanced"
+    assert service.exports[-1]["output_dir"] == tmp_path / "wxid_friend"
+    assert "正在转写第" in gui.progress_text("Transcribing batch 1/2")
 
 
 def test_cancel_and_close_wait_for_worker(window):
@@ -162,10 +208,44 @@ def test_initialize_stays_in_same_window(tmp_path, monkeypatch, tk_root):
         _wait(root, lambda: not app._busy)
         assert not app._ready
         assert app.setup_frame.winfo_ismapped() or app.setup_frame.winfo_manager() == "grid"
+        assert app.initialize_button.cget("text") == "初始化"
+        assert app.refresh_button.cget("text") == "重新检查"
         app.initialize()
         _wait(root, lambda: not app._busy)
         assert app._ready
         assert service.ready
+    finally:
+        app.close()
+        root.update()
+
+
+def test_initialization_requires_account_when_multiple_found(tmp_path, monkeypatch, tk_root):
+    import tkinter as tk
+    import wechat_local_archive.gui as gui
+
+    monkeypatch.setattr(gui, "load_ui_config", lambda: None)
+    monkeypatch.setattr(gui, "save_ui_config", lambda config: None)
+    root = tk.Toplevel(tk_root)
+    root.withdraw()
+    service = FakeService(tmp_path, ready=False)
+    service.accounts = lambda: [{"account": "wxid_one"}, {"account": "wxid_two"}]
+    initialized = []
+    original_initialize = service.initialize
+    def initialize(account=None):
+        initialized.append(account)
+        return original_initialize(account)
+    service.initialize = initialize
+    app = gui.ArchiveWindow(root, service=service)
+    try:
+        _wait(root, lambda: not app._busy)
+        app.initialize()
+        assert not initialized
+        assert "选择" in app.status_text.get()
+        app.account_choice.set("wxid_two")
+        app.initialize()
+        _wait(root, lambda: not app._busy)
+        assert initialized == ["wxid_two"]
+        assert app._ready
     finally:
         app.close()
         root.update()
@@ -185,9 +265,12 @@ def test_gui_dpi_layout_smoke(window, scale):
         assert app.open_button.winfo_ismapped()
         assert app.ready_frame.winfo_reqwidth() <= root.winfo_width()
         root.geometry("600x520")
+        app._toggle_options()
         root.update()
+        assert app.options_frame.winfo_ismapped()
         assert app.form_canvas.winfo_height() > 0
         assert app.form_scroll.winfo_ismapped()
+        assert app.ready_frame.winfo_reqwidth() <= root.winfo_width()
         assert app.open_button.winfo_ismapped()
     finally:
         root.withdraw()
