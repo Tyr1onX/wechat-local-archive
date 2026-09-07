@@ -51,18 +51,18 @@ jobs:
           .\.venv-ci\Scripts\python.exe scripts/build_portable.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Extracted application smoke
-        run: .\.venv-ci\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.1.zip
+        run: .\.venv-ci\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.2.zip
       - name: Verify tagged release
         if: startsWith(github.ref, 'refs/tags/v')
-        run: .\.venv-ci\Scripts\python.exe scripts/verify_release.py dist/wechat-local-archive-windows-x64-v0.2.1.zip
+        run: .\.venv-ci\Scripts\python.exe scripts/verify_release.py dist/wechat-local-archive-windows-x64-v0.2.2.zip
       - name: Diff check
         run: git diff --check
       - uses: actions/upload-artifact@v4
         with:
           name: wechat-local-archive-windows-x64
           path: |
-            dist/wechat-local-archive-windows-x64-v0.2.1.zip
-            dist/wechat-local-archive-windows-x64-v0.2.1.zip.sha256
+            dist/wechat-local-archive-windows-x64-v0.2.2.zip
+            dist/wechat-local-archive-windows-x64-v0.2.2.zip.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -85,11 +85,11 @@ jobs:
           name: wechat-local-archive-windows-x64
           path: dist
       - name: Verify release provenance
-        run: python scripts/verify_release.py dist/wechat-local-archive-windows-x64-v0.2.1.zip
+        run: python scripts/verify_release.py dist/wechat-local-archive-windows-x64-v0.2.2.zip
       - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME dist/wechat-local-archive-windows-x64-v0.2.1.zip dist/wechat-local-archive-windows-x64-v0.2.1.zip.sha256 --verify-tag --title "WeChat Local Archive $env:GITHUB_REF_NAME" --notes-file docs/release-v0.2.1.md
+          gh release create $env:GITHUB_REF_NAME dist/wechat-local-archive-windows-x64-v0.2.2.zip dist/wechat-local-archive-windows-x64-v0.2.2.zip.sha256 --verify-tag --title "WeChat Local Archive $env:GITHUB_REF_NAME" --notes-file docs/release-v0.2.2.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

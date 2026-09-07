@@ -1,0 +1,2 @@
+# Generated dependency locks must have identical bytes on Windows and in Git.
+requirements-win*.lock text eol=lf

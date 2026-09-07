@@ -42,7 +42,7 @@ def verify_release(archive: Path) -> None:
             if info.get(field) != value or (field == "dirty" and info.get(field) is not False):
                 raise ValueError(f"Release provenance mismatch: {field}: {info.get(field)!r} != {value!r}")
         for field, name in (("lock_sha256", "requirements-win-build.lock"), ("base_lock_sha256", "requirements-win.lock")):
-            if info[field] != digest((ROOT / name).read_bytes()):
+            if info[field] != digest(subprocess.check_output(["git", "show", f"{commit}:{name}"], cwd=ROOT)):
                 raise ValueError(f"Release dependency lock mismatch: {name}")
         for line in source.read(prefix + "SHA256SUMS.txt").decode("utf-8").splitlines():
             expected, relative = line.split("  ", 1)

@@ -31,6 +31,20 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def committed_digest(commit: str, name: str) -> str:
+    """Hash the committed lock, independent of Windows checkout line endings."""
+    data = subprocess.check_output(["git", "show", f"{commit}:{name}"], cwd=ROOT)
+    return hashlib.sha256(data).hexdigest()
+
+
+def tracked_source_is_dirty() -> bool:
+    """Check actual tracked content, including staged changes, not Git's stat cache."""
+    result = subprocess.run(["git", "diff", "--quiet", "--exit-code", "HEAD", "--"], cwd=ROOT, check=False)
+    if result.returncode not in (0, 1):
+        raise RuntimeError(f"Unable to check source changes: git exited {result.returncode}")
+    return result.returncode == 1
+
+
 def _release_tag(version: str, commit: str) -> str | None:
     expected = f"v{version}"
     if os.environ.get("GITHUB_REF_TYPE") == "tag":
@@ -62,10 +76,12 @@ def build(out_dir: Path) -> Path:
             raise RuntimeError(f"Build dependency mismatch: {name} {actual} != {required}")
     commit = git("rev-parse", "HEAD")
     epoch = int(git("show", "-s", "--format=%ct", "HEAD"))
-    dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
+    dirty = tracked_source_is_dirty()
     tag = _release_tag(version, commit)
     if tag and dirty:
         raise RuntimeError("Tagged release source is dirty; commit all changes before building")
+    lock_digest = committed_digest(commit, "requirements-win-build.lock") if not dirty else digest(ROOT / "requirements-win-build.lock")
+    base_lock_digest = committed_digest(commit, "requirements-win.lock") if not dirty else digest(ROOT / "requirements-win.lock")
     info = {
         "version": version,
         "commit": commit,
@@ -74,8 +90,8 @@ def build(out_dir: Path) -> Path:
         "python": platform.python_version(),
         "architecture": platform.machine(),
         "pyinstaller": metadata.version("pyinstaller"),
-        "lock_sha256": digest(ROOT / "requirements-win-build.lock"),
-        "base_lock_sha256": digest(ROOT / "requirements-win.lock"),
+        "lock_sha256": lock_digest,
+        "base_lock_sha256": base_lock_digest,
         "source_date_epoch": epoch,
     }
     print(f"Build provenance: version={version}, commit={commit}, tag={tag}, dirty={dirty}", flush=True)
