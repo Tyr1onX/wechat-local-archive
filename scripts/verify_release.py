@@ -37,9 +37,10 @@ def verify_release(archive: Path) -> None:
     prefix = "wechat-local-archive-windows-x64/"
     with zipfile.ZipFile(archive) as source:
         info = json.loads(source.read(prefix + "build-info.json"))
-        if (info["version"] != version or info["commit"] != commit or
-                info["tag"] != tag or info["dirty"] is not False):
-            raise ValueError("Release build provenance does not match the tag")
+        expected = {"version": version, "commit": commit, "tag": tag, "dirty": False}
+        for field, value in expected.items():
+            if info.get(field) != value or (field == "dirty" and info.get(field) is not False):
+                raise ValueError(f"Release provenance mismatch: {field}: {info.get(field)!r} != {value!r}")
         for field, name in (("lock_sha256", "requirements-win-build.lock"), ("base_lock_sha256", "requirements-win.lock")):
             if info[field] != digest((ROOT / name).read_bytes()):
                 raise ValueError(f"Release dependency lock mismatch: {name}")

@@ -1,10 +1,10 @@
-## WeChat Local Archive v0.2.0
+## WeChat Local Archive v0.2.1
 
-首次 Windows 便携版。解压即可运行，不需要预装 Python、uv 或开发工具，也不需要管理员权限。
+首次 Windows 便携版。v0.2.0 的发布验收未通过、未发布；本版修正了发布来源校验后重新构建。解压即可运行，不需要预装 Python、uv 或开发工具，也不需要管理员权限。
 
 ### 使用
 
-下载 `wechat-local-archive-windows-x64-v0.2.0.zip`，解压后双击 `WeChatLocalArchive.exe`。命令行入口为 `WeChatLocalArchiveCLI.exe`，可使用 `--help`、`--version`。支持 Windows 10/11 x64。
+下载 `wechat-local-archive-windows-x64-v0.2.1.zip`，解压后双击 `WeChatLocalArchive.exe`。命令行入口为 `WeChatLocalArchiveCLI.exe`，可使用 `--help`、`--version`。支持 Windows 10/11 x64。
 
 首次使用需要已登录的 Windows 微信 4.x 完成本地初始化。之后可使用缓存密钥离线归档。默认输出到“下载\wechat-local-archive”，设置与 DPAPI 加密密钥保存在 `%LOCALAPPDATA%\WeChatLocalArchive`；删除程序文件夹不会删除这些数据。
 

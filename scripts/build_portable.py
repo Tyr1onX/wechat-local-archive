@@ -31,6 +31,19 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _release_tag(version: str, commit: str) -> str | None:
+    expected = f"v{version}"
+    if os.environ.get("GITHUB_REF_TYPE") == "tag":
+        tag = os.environ.get("GITHUB_REF_NAME")
+        if tag != expected:
+            raise RuntimeError(f"Release ref {tag!r} does not match {expected}")
+        if git("rev-parse", f"{tag}^{{commit}}") != commit:
+            raise RuntimeError("Release tag does not point to the checked-out commit")
+        return tag
+    tags = set(git("tag", "--points-at", "HEAD").splitlines())
+    return expected if expected in tags else None
+
+
 def build(out_dir: Path) -> Path:
     if sys.platform != "win32" or platform.machine().lower() not in {"amd64", "x86_64"}:
         raise RuntimeError("Portable builds require 64-bit Windows")
@@ -50,8 +63,9 @@ def build(out_dir: Path) -> Path:
     commit = git("rev-parse", "HEAD")
     epoch = int(git("show", "-s", "--format=%ct", "HEAD"))
     dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
-    tags = set(git("tag", "--points-at", "HEAD").splitlines())
-    tag = f"v{version}" if f"v{version}" in tags else None
+    tag = _release_tag(version, commit)
+    if tag and dirty:
+        raise RuntimeError("Tagged release source is dirty; commit all changes before building")
     info = {
         "version": version,
         "commit": commit,
@@ -64,6 +78,7 @@ def build(out_dir: Path) -> Path:
         "base_lock_sha256": digest(ROOT / "requirements-win.lock"),
         "source_date_epoch": epoch,
     }
+    print(f"Build provenance: version={version}, commit={commit}, tag={tag}, dirty={dirty}", flush=True)
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     (ROOT / "work").mkdir(exist_ok=True)

@@ -261,12 +261,12 @@ Windows x64 构建使用固定的 `requirements-win-build.lock` 和 PyInstaller 
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/build_portable.py
-.\.venv\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.0.zip
+.\.venv\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.1.zip
 ```
 
 `smoke_portable.py` 会将 ZIP 解压到隔离临时目录，清除 Python 虚拟环境路径并使用临时用户配置，检查版本、隐藏 GUI 初始化、原生 ASR 依赖及合成档案的 verify/AI/HTML/语音播放。它不读取真实微信数据。真实微信 bootstrap 与离线导出仍需在有授权测试账号的环境单独验证。
 
-`.github/workflows/portable.yml` 在 Windows CI 中从锁定依赖构建、测试并上传 ZIP artifact。仅 `v<版本>` tag 触发 Release，发布前检查 tag/commit/版本/锁哈希及包内文件校验。`scripts/verify_release.py` 可独立执行同样的来源校验。发布说明见 `docs/release-v0.2.0.md`。
+`.github/workflows/portable.yml` 在 Windows CI 中从锁定依赖构建、测试并上传 ZIP artifact。仅 `v<版本>` tag 触发 Release，发布前检查 tag/commit/版本/锁哈希及包内文件校验。`scripts/verify_release.py` 可独立执行同样的来源校验。发布说明见 `docs/release-v0.2.1.md`。
 
 ## 隐私与风险边界
 
