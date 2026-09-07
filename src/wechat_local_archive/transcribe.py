@@ -128,7 +128,7 @@ class SenseVoiceTranscriber:
         warnings: list[str] = []
         for index, message in enumerate(messages):
             checkpoint()
-            if not message.attachment or selected_voice_type(message.type_code) != 34:
+            if message.transcript or not message.attachment or selected_voice_type(message.type_code) != 34:
                 continue
             audio_path = (archive_root / message.attachment).resolve()
             if not audio_path.is_file():
@@ -137,6 +137,7 @@ class SenseVoiceTranscriber:
             cached = self.cache.load(audio_path, self.model_name)
             if cached:
                 message.transcript = cached
+                message.transcript_source = self.model_name
                 continue
             candidates.append((index, audio_path))
         if not candidates:
@@ -232,6 +233,7 @@ class SenseVoiceTranscriber:
                             message = messages[item.message_index]
                             self.cache.save(audio_by_message[item.message_index], self.model_name, transcript)
                             message.transcript = transcript
+                            message.transcript_source = self.model_name
                             completed += 1
                         else:
                             texts.pop(item.message_index, None)

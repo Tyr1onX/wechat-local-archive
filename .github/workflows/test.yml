@@ -20,6 +20,8 @@ jobs:
         run: |
           uv pip compile pyproject.toml --extra voice --extra dev --python-version 3.12 --python-platform windows --output-file requirements-win.lock
           git diff --exit-code -- requirements-win.lock
+          uv pip compile pyproject.toml --extra voice --extra verify --extra dev --python-version 3.12 --python-platform windows --constraint requirements-win.lock --output-file requirements-win-verify.lock
+          git diff --exit-code -- requirements-win-verify.lock
       - name: Create clean environment
         run: python -m venv .venv-ci
       - name: Install locked dependencies
@@ -40,5 +42,13 @@ jobs:
           .\.venv-ci\Scripts\python.exe -m wechat_local_archive gui --help
       - name: GUI smoke
         run: .\.venv-ci\Scripts\python.exe -m pytest tests/test_gui.py --basetemp=.pytest-tmp-gui
+      - name: Optional Whisper smoke
+        shell: pwsh
+        run: |
+          .\.venv-ci\Scripts\python.exe -c "import importlib.util; assert importlib.util.find_spec('faster_whisper') is None"
+          uv pip install --python .venv-ci\Scripts\python.exe -r requirements-win-verify.lock
+          .\.venv-ci\Scripts\python.exe -c "import importlib.metadata as m; assert m.version('faster-whisper') == '1.2.1'; assert m.version('ctranslate2') == '4.8.2'; assert m.version('wechatauto-replica') == '1.2.0.3'"
+          .\.venv-ci\Scripts\python.exe -m pytest tests/test_quality.py tests/test_transcribe.py --basetemp=.pytest-tmp-verify
+          .\.venv-ci\Scripts\python.exe -m wechat_local_archive retranscribe --help
       - name: Diff check
         run: git diff --check

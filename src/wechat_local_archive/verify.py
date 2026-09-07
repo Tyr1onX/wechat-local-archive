@@ -79,6 +79,15 @@ def verify_archive(root: Path, prune_orphans: bool = False) -> VerifyResult:
             )
         previous_time = message.timestamp_unix
 
+        if message.transcript_reviews:
+            if selected_media_type(message.type_code) != 34:
+                errors.append(f"transcript reviews belong to a non-voice message: {message.id}")
+            if message.transcript_source and message.transcript_source.startswith("faster-whisper:"):
+                if not any(r.model == message.transcript_source and r.text == message.transcript for r in message.transcript_reviews):
+                    errors.append(f"selected transcript does not match its review provenance: {message.id}")
+        elif message.transcript_source and message.transcript_source.startswith("faster-whisper:"):
+            errors.append(f"selected Whisper transcript has no review provenance: {message.id}")
+
         if selected_media_type(message.type_code) == 34:
             voice_count += 1
             if message.transcript:

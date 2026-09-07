@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Iterable
 
-SUPPORTED_SCHEMA_VERSIONS = {2, 3}
-CURRENT_SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSIONS = {2, 3, 4}
+CURRENT_SCHEMA_VERSION = 4
+
+
+@dataclass(slots=True)
+class TranscriptReview:
+    model: str
+    text: str
+    baseline: str
+    baseline_source: str
+    audio_sha256: str
 
 
 @dataclass(slots=True)
@@ -24,9 +33,16 @@ class ArchiveMessage:
     media_md5: str | None = None
     attachment: str | None = None
     transcript: str | None = None
+    transcript_source: str | None = None
+    transcript_reviews: list[TranscriptReview] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        result = asdict(self)
+        if self.transcript_source is None:
+            result.pop("transcript_source")
+        if not self.transcript_reviews:
+            result.pop("transcript_reviews")
+        return result
 
 
 @dataclass(slots=True)
@@ -148,6 +164,8 @@ def archive_from_dict(payload: dict) -> Archive:
                 media_md5=str(raw.get("media_md5") or "") or None,
                 attachment=str(raw.get("attachment") or "") or None,
                 transcript=str(raw.get("transcript") or "") or None,
+                transcript_source=str(raw.get("transcript_source") or "") or None,
+                transcript_reviews=_parse_transcript_reviews(raw.get("transcript_reviews", [])),
             )
         )
     return Archive(
@@ -176,8 +194,7 @@ def merge_archives(existing: Archive, fresh: Archive) -> Archive:
     for message in fresh.messages:
         old = old_by_id.get(message.id)
         if old is not None:
-            message.attachment = old.attachment
-            message.transcript = old.transcript
+            _preserve_message_data(old, message)
         merged[message.id] = message
     messages = sorted(merged.values(), key=lambda item: (item.timestamp_unix, item.sort_seq, item.local_id))
     return Archive(
@@ -191,6 +208,48 @@ def merge_archives(existing: Archive, fresh: Archive) -> Archive:
         range_start=fresh.range_start,
         range_end=fresh.range_end,
     )
+
+
+def _preserve_message_data(old: ArchiveMessage, fresh: ArchiveMessage) -> None:
+    # A changed payload must not inherit a transcript for potentially different audio.
+    if (old.type_code != fresh.type_code or old.content != fresh.content
+            or (old.media_md5 and fresh.media_md5 and old.media_md5 != fresh.media_md5)):
+        return
+    fresh.attachment = old.attachment
+    fresh.transcript = old.transcript
+    fresh.transcript_source = old.transcript_source
+    fresh.transcript_reviews = list(old.transcript_reviews)
+
+
+def refresh_archive(existing: Archive, fresh: Archive) -> Archive:
+    """Rebuild source/media while retaining historical reviews for unchanged messages."""
+    if existing.account != fresh.account or existing.conversation_id != fresh.conversation_id:
+        raise ValueError("Existing archive belongs to a different account or conversation")
+    old_by_id = {message.id: message for message in existing.messages}
+    for message in fresh.messages:
+        old = old_by_id.get(message.id)
+        if (old is not None and selected_media_type(old.type_code) == 34
+                and old.type_code == message.type_code and old.content == message.content):
+            message.transcript_reviews = list(old.transcript_reviews)
+    return fresh
+
+
+def _parse_transcript_reviews(value: object) -> list[TranscriptReview]:
+    if not isinstance(value, list):
+        raise ValueError("transcript_reviews must be a list")
+    reviews = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid transcript review")
+        fields = ("model", "text", "baseline", "baseline_source", "audio_sha256")
+        if any(not isinstance(raw.get(name), str) for name in fields):
+            raise ValueError("Invalid transcript review fields")
+        if (not raw["model"] or not raw["baseline_source"]
+                or len(raw["audio_sha256"]) != 64
+                or any(char not in "0123456789abcdef" for char in raw["audio_sha256"])):
+            raise ValueError("Invalid transcript review provenance")
+        reviews.append(TranscriptReview(**{name: raw[name] for name in fields}))
+    return reviews
 
 
 def selected_media_type(type_code: int) -> int:

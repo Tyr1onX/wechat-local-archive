@@ -146,6 +146,18 @@ def test_verify_preserves_derived_reader_audio_cache(tmp_path: Path) -> None:
     assert cache.read_bytes() == b"cached"
 
 
+def test_verify_rejects_inconsistent_selected_review(tmp_path: Path) -> None:
+    archive = _valid_archive(tmp_path)
+    from wechat_local_archive.archive import TranscriptReview
+    message = archive.messages[0]
+    message.transcript_reviews = [TranscriptReview("faster-whisper:test@revision", "复核结果", "语音内容", "legacy/unknown", "a" * 64)]
+    message.transcript_source = "faster-whisper:test@revision"
+    _write(tmp_path, archive)
+    result = verify_archive(tmp_path)
+    assert not result.ok
+    assert any("review provenance" in error for error in result.errors)
+
+
 def test_verify_prunes_orphans_only_when_archive_is_valid(tmp_path: Path) -> None:
     _valid_archive(tmp_path)
     orphan = tmp_path / "assets" / "orphan.bin"

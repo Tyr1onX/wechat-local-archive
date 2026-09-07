@@ -96,7 +96,7 @@ def test_normalize_payload_prefers_timestamp_over_cross_shard_sort_seq() -> None
     archive = normalize_payload(payload, "wxid_friend", "朋友")
     assert [message.local_id for message in archive.messages] == [2, 1]
     assert archive.account_name == "我自己"
-    assert archive.schema_version == 3
+    assert archive.schema_version == 4
 
 
 def test_archive_merge_preserves_existing_derived_fields() -> None:

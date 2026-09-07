@@ -105,7 +105,7 @@ def test_export_chat_writes_json_and_markdown(tmp_path: Path) -> None:
     markdown = summary.markdown_path.read_text(encoding="utf-8")
     assert payload["conversation"]["id"] == "wxid_friend"
     assert payload["account_name"] == "我自己"
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["messages"][0]["content"] == "你好"
     assert "你好" in markdown
     assert "· 朋友" in markdown
@@ -355,6 +355,21 @@ def test_complete_voice_transcript_does_not_initialize_asr(tmp_path: Path, monke
     )
 
     assert summary.transcript_count == 1
+
+
+def test_verify_mode_skips_clean_existing_voice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _FakeSession()
+    session.messages[0].update({"type": "语音", "type_code": 34, "content": "[语音]"})
+    first = export_chat(session, conversation_id="wxid_friend", conversation_name="朋友", output_dir=tmp_path, media="voice")
+    payload = json.loads(first.archive_path.read_text(encoding="utf-8"))
+    payload["messages"][0]["transcript"] = "这是一条正常的完整转写"
+    first.archive_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    monkeypatch.setattr("wechat_local_archive.exporter.SenseVoiceTranscriber", lambda **kwargs: (_ for _ in ()).throw(AssertionError("primary ASR initialized")))
+    monkeypatch.setattr("wechat_local_archive.quality.WhisperVerifier", lambda **kwargs: (_ for _ in ()).throw(AssertionError("Whisper initialized")))
+    summary = export_chat(session, conversation_id="wxid_friend", conversation_name="朋友", output_dir=tmp_path,
+                          media="voice", transcribe=True, voice_quality="verify")
+    assert summary.transcript_count == 1
+    assert not json.loads(first.archive_path.read_text(encoding="utf-8"))["messages"][0].get("transcript_reviews")
 
 
 def test_existing_archive_account_mismatch_fails_closed(tmp_path: Path) -> None:

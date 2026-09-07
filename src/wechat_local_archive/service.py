@@ -100,6 +100,7 @@ class ArchiveService:
         media_types: frozenset[int] | None = None,
         transcribe: bool = True,
         asr_preset: str = "balanced",
+        voice_quality: str = "fast",
         progress: ProgressCallback | None = None,
         cancel: Callable[[], None] | None = None,
     ) -> ExportSummary:
@@ -120,6 +121,7 @@ class ArchiveService:
                 media_types=media_types,
                 transcribe=transcribe,
                 asr_preset=asr_preset,
+                voice_quality=voice_quality,
                 progress=progress,
                 cancel=cancel,
             )

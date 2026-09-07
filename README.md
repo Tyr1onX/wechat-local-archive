@@ -67,10 +67,11 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[voice,dev]"
 ```
 
-修改依赖声明后，用固定的 uv 版本重新生成 lock：
+修改依赖声明后，用固定的 uv 版本重新生成 lock；复核依赖必须受基础 lock 约束，避免升级已验证的微信适配器：
 
 ```powershell
 uv pip compile pyproject.toml --extra voice --extra dev --python-version 3.12 --python-platform windows --output-file requirements-win.lock
+uv pip compile pyproject.toml --extra voice --extra verify --extra dev --python-version 3.12 --python-platform windows --constraint requirements-win.lock --output-file requirements-win-verify.lock
 ```
 
 ## 图形界面
@@ -97,6 +98,32 @@ wechat-archive ai D:\Archives\chat
 ```
 
 该命令只读取已有 `archive.json` 并重建 `ai.jsonl`；内容未变化时不会改写文件。日常增量导出也会自动补齐缺失或过期的 AI 文件。`verify` 会检查已存在的 `ai.jsonl` 是否与真源一致；旧档案尚未生成 AI 文件时仍可正常验证。
+
+### 可选语音复核
+
+默认仍只使用 SenseVoice，不安装或初始化 Whisper。需要复核时，先安装可选依赖；正式环境使用 `requirements-win-verify.lock`，它保留基础 lock 中的微信适配器版本。也可在开发环境安装 `.[voice,verify]`。
+
+```powershell
+.\.venv\Scripts\uv.exe pip install --python .\.venv\Scripts\python.exe -r requirements-win-verify.lock
+```
+
+已有档案可以完全不打开微信，按消息 ID 复核；默认不会替换原转写：
+
+```powershell
+wechat-archive retranscribe D:\Archives\chat --id <message-id>
+```
+
+首次使用可通过 `--download-model` 明确允许下载模型，或用 `--model-dir` 指向已有的转换模型目录。默认 `small`、CPU/int8、background 两线程；可选 `large-v3-turbo`，但没有经过本项目的中文准确率验证。模型下载不上传聊天或音频。
+
+复核结果保存在 `archive.json` 的 `transcript_reviews`，包含模型、原文、复核文本和音频哈希；冲突不自动判定谁正确。确认后可显式选用：
+
+```powershell
+wechat-archive retranscribe D:\Archives\chat --id <message-id> --apply-review
+```
+
+原文会保留在 provenance 中；同一模型有多个版本结果时需要 `--review-key` 指定。也可使用 `--start`、`--end` 或 `--all-suspicious` 限定范围，默认最多处理 20 条，`--limit` 可调整。普通导出可显式增加 `--voice-quality verify`，只对可疑项做二次复核，不自动替换文本；原有 `--asr-preset` 仍是资源档位，与质量模式独立。
+
+复核不是人工校对，也不提供可靠的逐字置信度。参见 [语音复核基准与边界](docs/voice-quality.md)。
 
 ### 1. 首次初始化
 
@@ -189,7 +216,7 @@ wechat-archive verify D:\Archives\chat --prune-orphans
 
 ```text
 chat/
-├─ archive.json        # 唯一稳定数据源
+├─ archive.json        # 唯一稳定数据源（schema 4，含可选转写来源/复核记录）
 ├─ chat.md             # 文本阅读
 ├─ ai.jsonl            # AI 分析用精简输出
 ├─ chat.html           # 双击即可打开的离线阅读器

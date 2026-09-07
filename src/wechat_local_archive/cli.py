@@ -7,6 +7,7 @@ from pathlib import Path
 from .ai_export import rebuild_ai_jsonl
 from .html_export import rebuild_html
 from .archive import parse_date
+from .quality import review_archive
 from .exporter import export_chat
 from .source import SourceError, bootstrap, discover_accounts, open_offline, resolve_chat
 from .state import clear_state, load_config, load_secret
@@ -42,7 +43,22 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--transcribe", action="store_true", help="Batch-transcribe extracted voice with SenseVoiceSmall")
     export.add_argument("--asr-preset", choices=("background", "balanced", "fast"), default="balanced")
     export.add_argument("--batch-size", type=int, default=None, help="Advanced batch-size override for the selected ASR preset")
+    export.add_argument("--voice-quality", choices=("fast", "verify"), default="fast", help="Optional review of up to 20 suspicious voices; never automatically replaces text")
     export.add_argument("--refresh", action="store_true", help="Rebuild the selected archive instead of incrementally updating it")
+
+    review = sub.add_parser("retranscribe", help="Review selected saved voices locally without opening WeChat")
+    review.add_argument("archive_dir", type=Path)
+    review.add_argument("--id", action="append", default=[], help="Exact voice message ID; may be repeated")
+    review.add_argument("--start", default=None, help="Inclusive YYYY-MM-DD")
+    review.add_argument("--end", default=None, help="Inclusive YYYY-MM-DD")
+    review.add_argument("--all-suspicious", action="store_true", help="Review heuristic candidates (default when no selector is given)")
+    review.add_argument("--limit", type=int, default=20)
+    review.add_argument("--model", choices=("small", "large-v3-turbo"), default="small")
+    review.add_argument("--model-dir", type=Path, default=None, help="Existing converted Whisper model directory")
+    review.add_argument("--download-model", action="store_true", help="Allow downloading the selected model; audio remains local")
+    review.add_argument("--asr-preset", choices=("background", "balanced", "fast"), default="background")
+    review.add_argument("--apply-review", action="store_true", help="Explicitly select the second result for the specified voices; original remains in provenance")
+    review.add_argument("--review-key", default=None, help="Exact stored model key when multiple reviews exist; requires --apply-review")
 
     ai = sub.add_parser("ai", help="Rebuild ai.jsonl from an existing archive without opening WeChat")
     ai.add_argument("archive_dir", type=Path)
@@ -73,6 +89,20 @@ def main(argv: list[str] | None = None) -> int:
             return _chats(args)
         if args.command == "export":
             return _export(args)
+        if args.command == "retranscribe":
+            if args.all_suspicious and (args.id or args.start or args.end):
+                raise ValueError("--all-suspicious cannot be combined with explicit selectors")
+            result = review_archive(
+                args.archive_dir, ids=tuple(args.id), start=parse_date(args.start), end=parse_date(args.end),
+                limit=args.limit, model=args.model, model_dir=args.model_dir,
+                allow_download=args.download_model, asr_preset=args.asr_preset, apply=args.apply_review,
+                review_key=args.review_key,
+                progress=lambda current, total, label: print(f"[{current}/{total}] {label}"),
+            )
+            print(f"selected: {result.selected}; new reviews: {result.reviewed}; applied: {result.applied}")
+            for warning in result.warnings:
+                print(f"warning: {warning}")
+            return 0
         if args.command == "ai":
             print(f"ai: {rebuild_ai_jsonl(args.archive_dir)}")
             return 0
@@ -187,6 +217,7 @@ def _export(args) -> int:
             transcribe=args.transcribe,
             asr_preset=args.asr_preset,
             batch_size=args.batch_size,
+            voice_quality=args.voice_quality,
             refresh=args.refresh,
             progress=progress,
         )

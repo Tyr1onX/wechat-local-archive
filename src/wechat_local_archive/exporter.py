@@ -18,6 +18,7 @@ from .archive import (
     Archive,
     archive_from_dict,
     merge_archives,
+    refresh_archive,
     normalize_payload,
     relative_attachment,
     selected_media_type,
@@ -48,6 +49,7 @@ def export_chat(
     transcribe: bool = False,
     asr_preset: str = "balanced",
     batch_size: int | None = None,
+    voice_quality: str = "fast",
     refresh: bool = False,
     progress=None,
     cancel: Callable[[], None] | None = None,
@@ -65,6 +67,10 @@ def export_chat(
         progress = report
 
     checkpoint()
+    if voice_quality not in {"fast", "verify"}:
+        raise ValueError("voice quality must be fast or verify")
+    if voice_quality == "verify" and not transcribe:
+        raise ValueError("Voice verification requires --transcribe")
     if media not in {"none", "voice", "all"}:
         raise ValueError("media must be one of: none, voice, all")
     if media_types is None:
@@ -107,7 +113,8 @@ def export_chat(
             start=start,
             end=end,
         )
-        archive = fresh if existing is None or refresh else merge_archives(existing, fresh)
+        archive = (fresh if existing is None else
+                   refresh_archive(existing, fresh) if refresh else merge_archives(existing, fresh))
     else:
         archive = existing
         if archive is None:  # pragma: no cover - defensive narrowing
@@ -127,6 +134,7 @@ def export_chat(
         warnings.extend(media_warnings)
 
     before_transcripts = sum(1 for message in archive.messages if message.transcript)
+    before_provenance = [(m.transcript, m.transcript_source, list(m.transcript_reviews)) for m in archive.messages]
     if transcribe and _has_pending_transcription(archive, output_dir):
         transcriber = SenseVoiceTranscriber(preset=asr_preset, batch_size=batch_size)
         _new_transcripts, voice_warnings = transcriber.transcribe_messages(
@@ -136,8 +144,16 @@ def export_chat(
             cancel=cancel,
         )
         warnings.extend(voice_warnings)
+    if voice_quality == "verify":
+        from .quality import review_messages
+        review = review_messages(archive, output_dir, asr_preset=asr_preset, progress=progress, cancel=cancel)
+        modified = modified or review.changed
+        warnings.extend(review.warnings)
     transcript_count = sum(1 for message in archive.messages if message.transcript)
-    modified = modified or transcript_count != before_transcripts
+    modified = modified or transcript_count != before_transcripts or any(
+        (m.transcript, m.transcript_source, m.transcript_reviews) != before
+        for m, before in zip(archive.messages, before_provenance)
+    )
     checkpoint()
 
     if modified:

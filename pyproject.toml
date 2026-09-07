@@ -20,6 +20,10 @@ voice = [
   "funasr-onnx>=0.4.2,<0.5",
   "modelscope>=1.39,<2",
 ]
+verify = [
+  "faster-whisper==1.2.1",
+  "ctranslate2==4.8.2",
+]
 dev = [
   "hatchling>=1.25,<2",
   "pytest>=8.4,<9",
