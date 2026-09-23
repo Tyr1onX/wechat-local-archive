@@ -26,6 +26,8 @@ button:disabled { cursor: default; opacity: .55; }
   justify-content: space-between;
 }
 .topbar h1 { margin: 0; font-size: 18px; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+button.quiet { min-height: 30px; padding: 0 10px; background: #fff; }
 .badge {
   padding: 5px 10px;
   border-radius: 999px;
