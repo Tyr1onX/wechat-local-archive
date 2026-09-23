@@ -77,6 +77,7 @@ async function loadChats(search = "") {
     const button = document.createElement("button");
     button.className = "chat" + (selectedChat?.username === chat.username ? " selected" : "");
     button.type = "button";
+    button.dataset.username = chat.username;
     const name = document.createElement("span");
     name.className = "chat-name";
     name.textContent = chat.name || chat.username;
@@ -105,7 +106,7 @@ function selectChat(chat) {
     $("chatMeta").textContent = `${chat.message_count ?? 0} 条消息`;
   }
   for (const button of document.querySelectorAll(".chat")) {
-    button.classList.toggle("selected", button.querySelector(".chat-name")?.textContent === (chat?.name || chat?.username));
+    button.classList.toggle("selected", button.dataset.username === chat?.username);
   }
   updateControls();
 }
@@ -270,6 +271,17 @@ async function cancelTask() {
   }
 }
 
+async function exitApp() {
+  clearError();
+  try {
+    await api("/api/shutdown", { method: "POST", body: "{}" });
+    if (taskTimer) clearTimeout(taskTimer);
+    document.body.innerHTML = '<main class="stopped"><h1>程序已退出</h1><p>可以关闭此页面。</p></main>';
+  } catch (error) {
+    showError(error);
+  }
+}
+
 async function openLocal(path, body = {}) {
   clearError();
   try {
@@ -279,6 +291,7 @@ async function openLocal(path, body = {}) {
   }
 }
 
+$("exitButton").addEventListener("click", exitApp);
 $("initializeButton").addEventListener("click", initialize);
 $("exportButton").addEventListener("click", startExport);
 $("verifyButton").addEventListener("click", startVerify);
