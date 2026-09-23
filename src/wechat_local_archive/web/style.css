@@ -152,3 +152,7 @@ fieldset label, .transcribe { color: #24292f !important; display: inline-flex !i
   .option-grid { grid-template-columns: 1fr; }
   .chat-heading { flex-direction: column; }
 }
+
+.stopped { max-width: 520px; margin: 80px auto; padding: 24px; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+.stopped h1 { font-size: 20px; margin: 0 0 8px; }
+.stopped p { color: #57606a; margin: 0; }
