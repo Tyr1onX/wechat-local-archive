@@ -276,7 +276,7 @@ async function exitApp() {
   try {
     await api("/api/shutdown", { method: "POST", body: "{}" });
     if (taskTimer) clearTimeout(taskTimer);
-    document.body.innerHTML = '<main class="stopped"><h1>程序已退出</h1><p>可以关闭此页面。</p></main>';
+    document.body.innerHTML = '<main class="stopped"><h1>正在安全退出</h1><p>当前操作结束后程序会自动关闭，可以关闭此页面。</p></main>';
   } catch (error) {
     showError(error);
   }
