@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>微信本地归档</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1>微信本地归档</h1>
+      <span id="statusBadge" class="badge">正在检查</span>
+    </header>
+
+    <div id="errorBox" class="error" hidden></div>
+
+    <section id="setup" class="setup" hidden>
+      <h2>需要首次初始化</h2>
+      <p>请保持 Windows 微信已登录并运行。</p>
+      <select id="accountSelect" hidden></select>
+      <button id="initializeButton" class="primary">初始化</button>
+    </section>
+
+    <main id="workspace" class="workspace" hidden>
+      <aside class="sidebar">
+        <input id="searchInput" type="search" placeholder="搜索会话" autocomplete="off">
+        <div id="chatList" class="chat-list"></div>
+      </aside>
+
+      <section class="content">
+        <div id="emptySelection" class="empty">选择一个会话</div>
+
+        <div id="chatPanel" hidden>
+          <div class="chat-heading">
+            <div>
+              <h2 id="chatName"></h2>
+              <p id="chatMeta"></p>
+            </div>
+            <button id="openRootButton" class="secondary">打开保存目录</button>
+          </div>
+
+          <div class="actions">
+            <button id="exportButton" class="primary">开始归档</button>
+            <button id="verifyButton" class="secondary">检查归档</button>
+          </div>
+
+          <details class="options">
+            <summary>更多选项</summary>
+            <div class="option-grid">
+              <label>开始日期<input id="startDate" type="date"></label>
+              <label>结束日期<input id="endDate" type="date"></label>
+              <fieldset>
+                <legend>保存内容</legend>
+                <label><input id="imagesOption" type="checkbox" checked> 图片</label>
+                <label><input id="voiceOption" type="checkbox" checked> 语音</label>
+                <label><input id="otherOption" type="checkbox" checked> 视频 / 文件</label>
+              </fieldset>
+              <label class="transcribe"><input id="transcribeOption" type="checkbox" checked> 转写语音</label>
+              <label>语音转写档位
+                <select id="presetSelect">
+                  <option value="background">后台（低占用）</option>
+                  <option value="balanced" selected>均衡（推荐）</option>
+                  <option value="fast">快速（高占用）</option>
+                </select>
+              </label>
+            </div>
+          </details>
+
+          <p class="path">保存位置：<span id="outputRoot"></span></p>
+        </div>
+
+        <section id="taskPanel" class="task" hidden>
+          <div class="task-line">
+            <strong id="taskLabel"></strong>
+            <span id="taskCount"></span>
+          </div>
+          <progress id="taskProgress" max="100" value="0"></progress>
+          <button id="cancelButton" class="danger">取消</button>
+        </section>
+
+        <section id="resultPanel" class="result" hidden>
+          <strong id="resultTitle"></strong>
+          <p id="resultSummary"></p>
+          <div id="resultActions" class="actions" hidden>
+            <button id="openChatButton" class="secondary">查看聊天</button>
+            <button id="openFolderButton" class="secondary">打开文件夹</button>
+            <button id="checkAgainButton" class="secondary">检查归档</button>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
