@@ -126,7 +126,7 @@ class WebApplication:
         )
 
         def operation(check, progress):
-            return self.service.export(
+            summary = self.service.export(
                 chat_selector=username,
                 output_dir=target,
                 start=start,
@@ -137,6 +137,10 @@ class WebApplication:
                 progress=progress,
                 cancel=check,
             )
+            check()
+            self.service.html(target)
+            check()
+            return summary
 
         return self._start_task("export", operation)
 
@@ -188,7 +192,7 @@ class WebApplication:
         self._ensure_inside(root, target)
         chat_html = target / "chat.html"
         if not chat_html.is_file():
-            raise ApiError(HTTPStatus.NOT_FOUND, "尚未生成可查看的聊天页面")
+            chat_html, _warnings = self.service.html(target)
         self._opener(chat_html)
         return {"ok": True}
 
