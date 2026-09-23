@@ -102,8 +102,11 @@ class WebApplication:
     def export(self, body: dict[str, Any]) -> dict[str, Any]:
         username = self._required_chat(body)
         chat = self._find_chat(username)
-        start = parse_date(str(body.get("start") or "").strip())
-        end = parse_date(str(body.get("end") or "").strip())
+        try:
+            start = parse_date(str(body.get("start") or "").strip())
+            end = parse_date(str(body.get("end") or "").strip())
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, error_text(exc)) from exc
         if start and end and start > end:
             raise ApiError(HTTPStatus.BAD_REQUEST, "开始日期不能晚于结束日期")
 
@@ -310,6 +313,7 @@ class ArchiveRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         try:
+            self._validate_host()
             if parsed.path == "/api/status":
                 return self._json(HTTPStatus.OK, self.app.status())
             if parsed.path == "/api/accounts":
@@ -335,6 +339,7 @@ class ArchiveRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
+            self._validate_host()
             body = self._body()
             routes = {
                 "/api/bootstrap": self.app.bootstrap,
@@ -364,6 +369,8 @@ class ArchiveRequestHandler(BaseHTTPRequestHandler):
             raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "请求内容过大")
         if length == 0:
             return {}
+        if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
+            raise ApiError(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "接口只接受 JSON 请求")
         try:
             value = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -371,6 +378,11 @@ class ArchiveRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(value, dict):
             raise ApiError(HTTPStatus.BAD_REQUEST, "请求格式无效")
         return value
+
+    def _validate_host(self) -> None:
+        host = self.headers.get("Host", "").split(":", 1)[0].strip("[]").casefold()
+        if host not in {"127.0.0.1", "localhost"}:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "只允许本机访问")
 
     def _json(self, status: int, payload: Any) -> None:
         data = json.dumps(_jsonable(payload), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -437,6 +449,9 @@ def main(*, smoke: bool = False, open_browser: bool = True) -> int:
         thread = Thread(target=server.serve_forever, name="wechat-archive-web-smoke", daemon=True)
         thread.start()
         try:
+            with urlopen(url, timeout=5) as response:
+                if response.status != HTTPStatus.OK or b"<title>" not in response.read():
+                    raise RuntimeError("Web smoke page failed")
             with urlopen(url + "api/status", timeout=5) as response:
                 if response.status != HTTPStatus.OK:
                     raise RuntimeError(f"Web smoke status failed: {response.status}")
