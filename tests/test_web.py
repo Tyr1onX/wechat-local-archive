@@ -231,7 +231,7 @@ def test_export_progress_duplicate_cancel_done_and_error(web_server):
     done = wait_task(base, "done")
     assert done["result"]["message_count"] == 12
     assert done["result"]["attachment_count"] == 3
-    assert service.html_calls[-1] == Path(saved[-1].output_root) / "wxid_friend"
+    assert service.html_calls == []
     assert service.exports[-1]["media_types"] == frozenset({3, 34, 43, 49})
     assert saved[0].asr_preset == "background"
 
@@ -274,6 +274,7 @@ def test_export_validation_verify_and_result_actions(web_server):
     assert status == 200
     assert payload["ok"] is True
     assert opened[-1].name == "chat.html"
+    assert service.html_calls[-1].name == "wxid_friend"
 
     service.fail_verify = True
     status, _payload = request(base, "/api/verify", method="POST", body={"chat": "wxid_friend"})
