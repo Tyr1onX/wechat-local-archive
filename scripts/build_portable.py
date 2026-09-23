@@ -110,13 +110,13 @@ def build(out_dir: Path) -> Path:
     (package / "README.txt").write_text(
         f"微信本地归档 v{version}\n\n"
         "支持 Windows 10/11 x64。解压后直接运行，无需安装 Python 或管理员权限。\n"
-        "双击 WeChatLocalArchive.exe 打开图形界面。\n"
+        "双击 WeChatLocalArchive.exe 启动本地服务并自动打开浏览器界面。\n"
         "命令行使用 WeChatLocalArchiveCLI.exe --help；--version 查看版本。\n\n"
         "首次使用：先正常登录 Windows 微信，再在工具中初始化。\n"
         "之后可使用已保存的本地数据库密钥离线导出，无需一直打开微信。\n"
         "首次语音转写需要下载 SenseVoice 模型；本包不包含模型权重。\n"
         "Whisper 二次复核不包含在基础便携包中。\n\n"
-        "默认归档：下载\\wechat-local-archive，可在界面修改。\n"
+        "默认归档：下载\\wechat-local-archive。\n"
         "加密密钥与设置：%LOCALAPPDATA%\\WeChatLocalArchive。\n"
         "删除程序目录不会删除上述归档或设置。不要随意分享聊天记录和密钥。\n"
         "本工具非微信官方产品，仅提供本地只读归档功能。\n",
