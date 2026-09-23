@@ -174,6 +174,12 @@ class WebApplication:
             self._task["label"] = "正在取消，等待当前操作完成…"
             return dict(self._task)
 
+    def close(self) -> None:
+        with self._lock:
+            if self.worker.running:
+                self.worker.cancel()
+        self.worker.join()
+
     def open_folder(self, body: dict[str, Any]) -> dict[str, Any]:
         root = self._output_root(load_ui_config())
         username = str(body.get("chat") or "").strip()
@@ -341,6 +347,10 @@ class ArchiveRequestHandler(BaseHTTPRequestHandler):
         try:
             self._validate_host()
             body = self._body()
+            if parsed.path == "/api/shutdown":
+                self._json(HTTPStatus.OK, {"ok": True})
+                Thread(target=self._shutdown_server, name="wechat-archive-shutdown", daemon=False).start()
+                return
             routes = {
                 "/api/bootstrap": self.app.bootstrap,
                 "/api/export": self.app.export,
@@ -378,6 +388,12 @@ class ArchiveRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(value, dict):
             raise ApiError(HTTPStatus.BAD_REQUEST, "请求格式无效")
         return value
+
+    def _shutdown_server(self) -> None:
+        try:
+            self.app.close()
+        finally:
+            self.server.shutdown()
 
     def _validate_host(self) -> None:
         host = self.headers.get("Host", "").split(":", 1)[0].strip("[]").casefold()
@@ -443,7 +459,8 @@ def create_server(
 
 
 def main(*, smoke: bool = False, open_browser: bool = True) -> int:
-    server = create_server()
+    app = WebApplication()
+    server = create_server(app)
     url = f"http://{HOST}:{server.server_address[1]}/"
     if smoke:
         thread = Thread(target=server.serve_forever, name="wechat-archive-web-smoke", daemon=True)
@@ -468,6 +485,7 @@ def main(*, smoke: bool = False, open_browser: bool = True) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        app.close()
         server.server_close()
     return 0
 
