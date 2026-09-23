@@ -1,15 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""One shared onedir runtime, with windowed GUI and console CLI launchers."""
+"""One shared onedir runtime, with browser UI and console CLI launchers."""
 
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 root = Path(SPECPATH).resolve().parent
-datas = [(str(root / "src" / "wechat_local_archive" / "reader.html"), "wechat_local_archive")]
+datas = [
+    (str(root / "src" / "wechat_local_archive" / "reader.html"), "wechat_local_archive"),
+    (str(root / "src" / "wechat_local_archive" / "web"), "wechat_local_archive/web"),
+]
 binaries = []
 hiddenimports = [
     "wechat_local_archive.cli",
     "wechat_local_archive.gui",
+    "wechat_local_archive.web",
     "wechat_local_archive.transcribe",
     "wechat_local_archive.quality",
     "wechat_local_archive.html_export",
