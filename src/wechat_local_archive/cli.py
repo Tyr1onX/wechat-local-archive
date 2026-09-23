@@ -24,8 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
-    gui = sub.add_parser("gui", help="Open the minimal desktop archive window")
+    gui = sub.add_parser("gui", help="Open the legacy desktop archive window")
     gui.add_argument("--smoke", action="store_true", help=argparse.SUPPRESS)
+
+    web = sub.add_parser("web", help="Open the local browser archive interface")
+    web.add_argument("--smoke", action="store_true", help=argparse.SUPPRESS)
+    web.add_argument("--no-browser", action="store_true", help="Start the local server without opening a browser")
 
     doctor = sub.add_parser("doctor", help="Check local data discovery and offline bootstrap state")
     doctor.add_argument("--db-dir", default=None)
@@ -86,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "gui":
             from .gui import main as gui_main
             return gui_main(smoke=args.smoke)
+        if args.command == "web":
+            from .web import main as web_main
+            return web_main(smoke=args.smoke, open_browser=not args.no_browser)
         if args.command == "doctor":
             return _doctor(args)
         if args.command == "bootstrap":
