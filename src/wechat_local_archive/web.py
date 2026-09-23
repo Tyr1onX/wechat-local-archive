@@ -129,7 +129,7 @@ class WebApplication:
         )
 
         def operation(check, progress):
-            summary = self.service.export(
+            return self.service.export(
                 chat_selector=username,
                 output_dir=target,
                 start=start,
@@ -140,10 +140,6 @@ class WebApplication:
                 progress=progress,
                 cancel=check,
             )
-            check()
-            self.service.html(target)
-            check()
-            return summary
 
         return self._start_task("export", operation)
 
@@ -473,6 +469,7 @@ def main(*, smoke: bool = False, open_browser: bool = True) -> int:
                 if response.status != HTTPStatus.OK:
                     raise RuntimeError(f"Web smoke status failed: {response.status}")
         finally:
+            app.close()
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
