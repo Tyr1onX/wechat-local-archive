@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""One shared onedir runtime, with browser UI and console CLI launchers."""
+"""Standalone onefile launchers for the browser UI and CI console smoke."""
 
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
@@ -8,6 +8,8 @@ root = Path(SPECPATH).resolve().parent
 datas = [
     (str(root / "src" / "wechat_local_archive" / "reader.html"), "wechat_local_archive"),
     (str(root / "src" / "wechat_local_archive" / "web"), "wechat_local_archive/web"),
+    (str(root / "LICENSE"), "licenses/project"),
+    (str(root / "docs" / "licenses" / "GPL-3.0.txt"), "licenses/FFmpeg"),
 ]
 binaries = []
 hiddenimports = [
@@ -53,17 +55,27 @@ analysis = Analysis(
 )
 pyz = PYZ(analysis.pure)
 
+
 def launcher(name, console):
+    # Passing binaries and datas directly to EXE makes each launcher a self-contained
+    # PyInstaller onefile executable. There is intentionally no COLLECT/_internal tree.
     return EXE(
-        pyz, analysis.scripts, [], exclude_binaries=True,
-        name=name, debug=False, bootloader_ignore_signals=False,
-        strip=False, upx=False, console=console,
+        pyz,
+        analysis.scripts,
+        analysis.binaries,
+        analysis.datas,
+        [],
+        name=name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=console,
         disable_windowed_traceback=False,
     )
 
+
+# The windowed executable is the only user-facing artifact. The console executable
+# is retained as a CI smoke helper so packaged native dependencies can be exercised.
 gui = launcher("WeChatLocalArchive", False)
 cli = launcher("WeChatLocalArchiveCLI", True)
-coll = COLLECT(
-    gui, cli, analysis.binaries, analysis.datas,
-    strip=False, upx=False, name="wechat-local-archive-windows-x64",
-)

@@ -462,9 +462,15 @@ def main(*, smoke: bool = False, open_browser: bool = True) -> int:
         thread = Thread(target=server.serve_forever, name="wechat-archive-web-smoke", daemon=True)
         thread.start()
         try:
-            with urlopen(url, timeout=5) as response:
-                if response.status != HTTPStatus.OK or b"<title>" not in response.read():
-                    raise RuntimeError("Web smoke page failed")
+            for relative, marker in (
+                ("", b"<title>"),
+                ("app.js", b"/api/"),
+                ("style.css", b"{"),
+            ):
+                with urlopen(url + relative, timeout=5) as response:
+                    data = response.read()
+                    if response.status != HTTPStatus.OK or marker not in data:
+                        raise RuntimeError(f"Web smoke asset failed: {relative or 'index.html'}")
             with urlopen(url + "api/status", timeout=5) as response:
                 if response.status != HTTPStatus.OK:
                     raise RuntimeError(f"Web smoke status failed: {response.status}")
