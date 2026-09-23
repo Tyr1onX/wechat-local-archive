@@ -1,4 +1,4 @@
-"""Shared entry point for the windowed and console portable launchers."""
+"""Shared entry point for the browser UI and console portable launchers."""
 
 import sys
 from pathlib import Path
@@ -10,8 +10,8 @@ def main() -> int:
     if console or args:
         from wechat_local_archive.cli import main as cli_main
         return cli_main(args)
-    from wechat_local_archive.gui import main as gui_main
-    return gui_main()
+    from wechat_local_archive.web import main as web_main
+    return web_main()
 
 
 if __name__ == "__main__":
