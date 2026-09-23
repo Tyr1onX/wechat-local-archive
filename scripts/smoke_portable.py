@@ -55,7 +55,7 @@ def run(*, package: Path) -> None:
 
         assert f"wechat-archive {__version__}" in call("--version")
         assert "verify" in call("--help")
-        call("gui", "--smoke")
+        call("web", "--smoke")
         assert "runtime: PASS" in call("doctor", "--db-dir", str(root / "empty-db"), "--runtime")
 
         fixture = root / "fixture"
@@ -82,7 +82,7 @@ def run(*, package: Path) -> None:
         assert hashlib.sha256(source.read_bytes()).digest() == before
         assert not (state / "WeChatLocalArchive" / "secrets.dpapi").exists()
         print("Portable isolated smoke: PASS")
-        print("Version, hidden GUI initialization, native runtime, offline verify/AI/HTML/audio: PASS")
+        print("Version, local Web UI, native runtime, offline verify/AI/HTML/audio: PASS")
         print("No host Python, WeChat state, or real conversation data used")
 
 
