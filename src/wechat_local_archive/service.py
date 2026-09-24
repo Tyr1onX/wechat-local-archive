@@ -8,6 +8,7 @@ import json
 import re
 
 from .exporter import ExportSummary, export_chat
+from .html_export import rebuild_html
 from .source import bootstrap, discover_accounts, open_offline, resolve_chat
 from .state import load_config, load_secret
 from .verify import VerifyResult, verify_archive
@@ -125,6 +126,9 @@ class ArchiveService:
                 progress=progress,
                 cancel=cancel,
             )
+
+    def html(self, archive_dir: Path) -> tuple[Path, tuple[str, ...]]:
+        return rebuild_html(archive_dir)
 
     def verify(self, archive_dir: Path) -> VerifyResult:
         return verify_archive(archive_dir)

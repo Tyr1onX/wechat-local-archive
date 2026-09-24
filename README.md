@@ -49,9 +49,9 @@ DPAPI secret → validated DB keys → local SQLCipher decrypt → local DB expo
 
 ## Windows 便携版
 
-普通用户优先从 [GitHub Releases](https://github.com/Tyr1onX/wechat-local-archive/releases) 下载 Windows x64 ZIP。解压后双击 `WeChatLocalArchive.exe`，无需安装 Python、uv 或管理员权限；命令行入口是 `WeChatLocalArchiveCLI.exe`。基础包包含本地 SenseVoice 运行时，但不包含模型权重或可选 Whisper 复核依赖。首次模型下载后可离线转写。
+普通用户优先从 [GitHub Releases](https://github.com/Tyr1onX/wechat-local-archive/releases) 下载 Windows x64 的 `WeChatLocalArchive.exe`。这是 PyInstaller onefile 单文件程序，不需要解压应用目录，也不依赖旁边的 `_internal`；双击后程序只在 `127.0.0.1` 启动本地 HTTP 服务并自动打开默认浏览器。无需安装 Python、Node.js、npm、uv 或管理员权限。基础 EXE 包含本地 SenseVoice 运行时，但不包含模型权重或可选 Whisper 复核依赖。首次模型下载后可离线转写。
 
-便携版与 Python 版使用相同的 `%LOCALAPPDATA%\WeChatLocalArchive` 设置、DPAPI 密钥和默认归档目录。删除程序文件夹不会删除用户数据；不要把密钥或聊天归档复制到发布包中。发布包提供 `build-info.json`、`SHA256SUMS.txt` 和第三方许可文本，ZIP 旁提供 SHA256 校验文件。当前没有独立代码签名，不应通过关闭 Windows 安全保护来解决下载警告。
+便携版与 Python 版使用相同的 `%LOCALAPPDATA%\WeChatLocalArchive` 设置、DPAPI 密钥和默认归档目录。删除 EXE 不会删除用户数据；不要把密钥或聊天归档复制到发布文件中。Release 同页提供 `WeChatLocalArchive.exe.sha256`；GitHub Actions artifact 自身仍会套一层传输 ZIP，但其中的主 EXE 解出后可独立运行。当前没有独立代码签名，不应通过关闭 Windows 安全保护来解决下载警告。
 
 ## Python 安装（开发与高级功能）
 
@@ -81,13 +81,15 @@ uv pip compile pyproject.toml --extra voice --extra verify --extra dev --python-
 uv pip compile pyproject.toml --extra voice --extra dev --extra build --python-version 3.12 --python-platform windows --constraint requirements-win.lock --output-file requirements-win-build.lock
 ```
 
-## 图形界面
+## 本地 Web 界面
 
-安装后运行 `wechat-archive-gui`，或使用 `wechat-archive gui`。界面使用 Windows 自带的 tkinter/ttk，不需要 Electron、WebView 或额外 GUI 运行时。若 Python 提示缺少 tkinter，请安装包含 Tcl/Tk 的完整 Python 3.12。
+便携版双击 `WeChatLocalArchive.exe` 后直接进入本地 Web 界面。Python 安装也可以运行 `wechat-archive web`；服务默认从 `127.0.0.1:40654` 开始选择可用端口并自动打开浏览器。页面使用原生 HTML/CSS/JavaScript，不需要 Node.js、npm、Electron 或前端构建链，聊天数据仍只由本机进程读取和处理。
 
-中文界面按“首次初始化 → 选择聊天 → 选择保存位置 → 开始归档 → 打开结果”组织。日期范围、媒体选择和语音转写资源档位放在“更多选项”，默认保存已有媒体并转写语音；资源档位显示为“后台（低占用）/均衡（推荐）/快速（高占用）”，内部仍使用原有英文参数。默认输出到“下载\wechat-local-archive”，可自行修改。已有匹配的旧归档会复用；新归档使用稳定的会话 ID 目录，避免同名联系人混淆。中文化只改变界面文案，不翻译或迁移真实磁盘路径。
+界面按“首次初始化 → 搜索并选择聊天 → 开始归档 → 查看进度/取消 → 查看或检查结果”组织。日期范围、媒体选择和语音转写资源档位放在“更多选项”；默认输出到“下载\\wechat-local-archive”，如果已有 UI 配置则继续沿用当前输出根目录。浏览器不会提交任意本机路径，页面只显示保存位置并通过本地 API 打开受控的归档目录。
 
-导出默认增量更新。`CANCEL` 会等待当前不可中断的数据库或模型操作结束，然后安全停止；已经完成的语音转写会保留在本地缓存，下次继续使用。关闭正在工作的窗口也会先请求取消，不会直接丢弃后台写入。窗口仅记住输出根目录和 ASR 档位。首次下载模型需要网络，之后可离线转写。
+任务进度通过 `GET /api/task` 轮询现有 `ArchiveWorker` 状态，取消继续使用原有安全取消机制。点击“查看聊天”时，如果归档尚未生成 `chat.html`，会复用现有 HTML 导出能力按需生成。页面右上角“退出”会先请求取消仍在运行的任务，等待后台操作安全结束后关闭本地服务。
+
+迁移验证期间仍保留原 Tkinter 界面，可用 `wechat-archive gui` 启动；它不再是便携版默认入口。Web 功能和 Windows portable 验证稳定后再删除旧 GUI，避免在迁移过程中失去可回退的已验证入口。
 
 ## 使用
 
@@ -257,16 +259,16 @@ wechat-archive html D:\Archives\chat --no-audio
 
 ## 构建与发布
 
-Windows x64 构建使用固定的 `requirements-win-build.lock` 和 PyInstaller onedir。GUI、CLI 共用一套运行时，不使用 onefile 或常驻服务器。构建前先安装锁定依赖及本项目，再执行：
+Windows x64 构建使用固定的 `requirements-win-build.lock` 和 PyInstaller onefile。用户入口是独立的 `WeChatLocalArchive.exe`；构建过程同时生成一个独立的 console helper 供 CI 深度 smoke 使用，但它不进入普通用户 artifact。迁移期旧 Tkinter 代码仍保留在源码中，不再要求用户携带 onedir 运行时。构建前先安装锁定依赖及本项目，再执行：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/build_portable.py
-.\.venv\Scripts\python.exe scripts/smoke_portable.py dist/wechat-local-archive-windows-x64-v0.2.4.zip
+.\.venv\Scripts\python.exe scripts/smoke_portable.py dist/WeChatLocalArchive.exe
 ```
 
-`smoke_portable.py` 会将 ZIP 解压到隔离临时目录，清除 Python 虚拟环境路径并使用临时用户配置，检查版本、隐藏 GUI 初始化、原生 ASR 依赖及合成档案的 verify/AI/HTML/语音播放。它不读取真实微信数据。真实微信 bootstrap 与离线导出仍需在有授权测试账号的环境单独验证。
+`smoke_portable.py` 会把主 EXE 单独复制到隔离临时目录，在没有 `_internal`、源码目录或宿主 Python 路径的条件下启动 Web smoke，并检查首页、`app.js`、`style.css` 与 `/api/status`。随后使用 CI console helper 继续检查原生 ASR 依赖及合成档案的 verify/AI/HTML/语音播放。它不读取真实微信数据。真实微信 bootstrap 与离线导出仍需在有授权测试账号的环境单独验证。
 
-`.github/workflows/portable.yml` 在 Windows CI 中从锁定依赖构建、测试并上传 ZIP artifact。仅 `v<版本>` tag 触发 Release，发布前检查 tag/commit/版本/锁哈希及包内文件校验。`scripts/verify_release.py` 可独立执行同样的来源校验。发布说明见 `docs/release-v0.2.4.md`。
+`.github/workflows/portable.yml` 在 Windows CI 中从锁定依赖构建、测试，并只上传 `WeChatLocalArchive.exe` 与 `WeChatLocalArchive.exe.sha256`。GitHub Actions 会为 artifact 自动套传输 ZIP，但下载后主 EXE 可单独运行。仅 `v<版本>` tag 触发 Release；`scripts/verify_release.py` 会检查 tag/HEAD、EXE 校验值并再次运行 standalone Web smoke。发布说明见 [docs/release-v0.2.4.md](docs/release-v0.2.4.md)。
 
 ## 隐私与风险边界
 
