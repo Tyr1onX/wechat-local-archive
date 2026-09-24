@@ -153,6 +153,7 @@ def build(out_dir: Path) -> Path:
     main_exe = out_dir / MAIN_EXE
     cli_exe = out_dir / CLI_EXE
     _check_outputs(main_exe, cli_exe)
+    _check_contents(out_dir)
 
     checksum = digest(main_exe)
     checksum_path = out_dir / f"{MAIN_EXE}.sha256"
@@ -161,6 +162,31 @@ def build(out_dir: Path) -> Path:
     print(f"CI helper: {cli_exe}")
     print(f"SHA256: {checksum}")
     return main_exe
+
+
+def _check_contents(output_dir: Path) -> None:
+    """Reject accidental private data, models, and legacy onedir runtime output."""
+    forbidden_names = {
+        "archive.json", "chat.md", "ai.jsonl", "chat.html",
+        "secrets.dpapi", "keys.json", "history.json",
+        "model.bin", "pytorch_model.bin", "direct_url.json",
+    }
+    forbidden_parts = {"db_storage", "xwechat_files", "reader-audio", "_internal"}
+    for path in output_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(output_dir)
+        if (
+            path.name.casefold() in forbidden_names
+            or any(part.casefold() in forbidden_parts for part in relative.parts)
+            or path.suffix.casefold() in {
+                ".db", ".sqlite", ".sqlite3", ".silk",
+                ".onnx", ".safetensors", ".ckpt",
+            }
+        ):
+            raise RuntimeError(
+                f"Unexpected private data, model, or legacy runtime in output: {relative}"
+            )
 
 
 def _check_outputs(main_exe: Path, cli_exe: Path) -> None:
